@@ -9,96 +9,96 @@
 ```mermaid
 flowchart TB
 
-%% =============== 顶层入口（DNS / CDN / LB / GW） ===============
-U[用户 / 客户端]
+%% ===== Top Entry =====
+U[Client]
 DNS[DNS]
 CF[CloudFront]
-ALB_PUB[ALB aie1p-apisix-public]
-ALB_INT[ALB aie1p-apisix-internal]
-NLB_AWF[NLB awf-spa-nlb<br/>ports 80,443<br/>external]
-APISIX[APISIX 网关]
-INGRESS_NGX[ingress-nginx-controller<br/>svc 80,443]
+ALB_PUB[ALB apisix-public]
+ALB_INT[ALB apisix-internal]
+NLB_AWF[NLB awf-spa-nlb 80 443 external]
+APISIX[APISIX]
+INGRESS_NGX[ingress-nginx-controller svc80 443]
 
-U --> DNS --> CF
-CF --> ALB_PUB
-DNS --> ALB_INT
-CF --> NLB_AWF
-ALB_PUB --> APISIX
-ALB_INT --> APISIX
-NLB_AWF --> M_AWF_SPA
+U-->DNS-->CF
+CF-->ALB_PUB
+DNS-->ALB_INT
+CF-->NLB_AWF
+ALB_PUB-->APISIX
+ALB_INT-->APISIX
+NLB_AWF-->M_AWF_SPA
 
-%% =============== Landry（现货域） ===============
-subgraph LANDRY[Landry 命名空间（现货域）]
-  L_ANEMONE[landry-anemone-web<br/>svc 8080]
-  L_APA_SPA[landry-apa-spa<br/>svc 8080]
-  L_AWFTEST[landry-awftest-spa<br/>svc 8080]
-  L_BROKER_SVR[landry-brokerserver-web<br/>NodePort 8080→30864]
-  L_CES_ACCESS[landry-ces-accesshttp<br/>svc 8080]
-  L_CES_CACHE[landry-ces-cachecenter<br/>svc 7810,7811,7812,7813,7802,7803]
-  L_CES_HISTR[landry-ces-historyreader<br/>svc 7516]
-  L_CES_HISTW[landry-ces-historywriter<br/>no svc]
-  L_CES_MKTPR[landry-ces-marketprice<br/>svc 7416]
-  L_CES_MATCH[landry-ces-matchengine<br/>svc 7316]
-  L_CES_MON[landry-ces-monitorcenter<br/>svc 5555]
-  L_CES_SUM[landry-ces-tradesummary<br/>svc 7519]
-  L_CLAIRVOY[landry-clairvoy-web<br/>NodePort 8080→30906,9000→31816]
-  L_COBOCB[landry-cobocb-web<br/>svc 8080]
-  L_COBOGW[landry-cobogw-web<br/>svc 8080]
-  L_GATEWAY[landry-gateway-web<br/>svc 8080]
-  L_MACK_SPA[landry-mackerel-spa<br/>svc 8080]
-  L_SPOTAPI[landry-spotapi-web<br/>svc 8080]
-  L_SPOTTASK[landry-spottask-web<br/>svc 8080]
-  L_SPOTWS[landry-spotws-web<br/>svc 8080]
-  L_TG_BOT[landry-tgsggd-bot<br/>no port]
-  L_TRANS[landry-trans-web<br/>NodePort 8080→31603,9000→31562]
-  L_USER[landry-userserver-web<br/>svc 8080]
+%% ===== Landry namespace =====
+subgraph LANDRY[Landry]
+  L_ANEMONE[landry-anemone-web svc8080]
+  L_APA_SPA[landry-apa-spa svc8080]
+  L_AWFTEST[landry-awftest-spa svc8080]
+  L_BROKER_SVR[landry-brokerserver-web NodePort 8080-30864]
+  L_CES_ACCESS[landry-ces-accesshttp svc8080]
+  L_CES_CACHE[landry-ces-cachecenter svc7810 7811 7812 7813 7802 7803]
+  L_CES_HISTR[landry-ces-historyreader svc7516]
+  L_CES_HISTW[landry-ces-historywriter no-svc]
+  L_CES_MKTPR[landry-ces-marketprice svc7416]
+  L_CES_MATCH[landry-ces-matchengine svc7316]
+  L_CES_MON[landry-ces-monitorcenter svc5555]
+  L_CES_SUM[landry-ces-tradesummary svc7519]
+  L_CLAIRVOY[landry-clairvoy-web NodePort 8080-30906 9000-31816]
+  L_COBOCB[landry-cobocb-web svc8080]
+  L_COBOGW[landry-cobogw-web svc8080]
+  L_GATEWAY[landry-gateway-web svc8080]
+  L_MACK_SPA[landry-mackerel-spa svc8080]
+  L_SPOTAPI[landry-spotapi-web svc8080]
+  L_SPOTTASK[landry-spottask-web svc8080]
+  L_SPOTWS[landry-spotws-web svc8080]
+  L_TG_BOT[landry-tgsggd-bot no-port]
+  L_TRANS[landry-trans-web NodePort 8080-31603 9000-31562]
+  L_USER[landry-userserver-web svc8080]
 end
 
-%% =============== Morph（合约域） ===============
-subgraph MORPH[Morph 命名空间（合约域）]
-  M_AWF_SPA[morph-awf-spa<br/>svc 8080]
-  M_AWFTEST[morph-awftest-spa<br/>svc 8080]
-  M_COND[morph-cond-web<br/>svc 8080]
-  M_FADMIN[morph-futuresadmin-web<br/>svc 8080]
-  M_FMKT[morph-futuresmarket-app<br/>svc 8080]
-  M_FOPEN[morph-futuresopen-web<br/>svc 8080]
-  M_FSCHED[morph-futuresschedule-app<br/>svc 8080]
-  M_FWEB[morph-futuresweb-web<br/>svc 8080]
-  M_FWS[morph-futuresws-app<br/>svc 8080]
-  M_ACCESSHTTP[morph-narwhal-accesshttp<br/>svc 8080 + agent 8888]
-  M_ALERT[morph-narwhal-alertcenter<br/>svc 4444 + 8888]
-  M_CACHE[morph-narwhal-cachecenter<br/>svc 7810,7802,7803 + 8888]
-  M_HISTR[morph-narwhal-historyreader<br/>svc 7516 + 8888]
-  M_HISTW[morph-narwhal-historywriter<br/>no svc + 8888]
-  M_MKTIDX[morph-narwhal-marketindex<br/>svc 7901 + 8888]
-  M_MKTPR[morph-narwhal-marketprice<br/>svc 7416 + 8888]
-  M_MATCH[morph-narwhal-matchengine<br/>svc 7316,8316 + 8888]
-  M_MON[morph-narwhal-monitorcenter<br/>svc 5555 + 8888]
-  M_OPLOG[morph-narwhal-operlogcompact<br/>no svc]
-  M_SUM[morph-narwhal-tradesummary<br/>svc 7519 + 8888]
-  M_SUB[morph-sub-web<br/>svc 8080]
+%% ===== Morph namespace =====
+subgraph MORPH[Morph]
+  M_AWF_SPA[morph-awf-spa svc8080]
+  M_AWFTEST[morph-awftest-spa svc8080]
+  M_COND[morph-cond-web svc8080]
+  M_FADMIN[morph-futuresadmin-web svc8080]
+  M_FMKT[morph-futuresmarket-app svc8080]
+  M_FOPEN[morph-futuresopen-web svc8080]
+  M_FSCHED[morph-futuresschedule-app svc8080]
+  M_FWEB[morph-futuresweb-web svc8080]
+  M_FWS[morph-futuresws-app svc8080]
+  M_ACCESSHTTP[morph-narwhal-accesshttp svc8080 agent8888]
+  M_ALERT[morph-narwhal-alertcenter svc4444 agent8888]
+  M_CACHE[morph-narwhal-cachecenter svc7810 7802 7803 agent8888]
+  M_HISTR[morph-narwhal-historyreader svc7516 agent8888]
+  M_HISTW[morph-narwhal-historywriter no-svc agent8888]
+  M_MKTIDX[morph-narwhal-marketindex svc7901 agent8888]
+  M_MKTPR[morph-narwhal-marketprice svc7416 agent8888]
+  M_MATCH[morph-narwhal-matchengine svc7316 8316 agent8888]
+  M_MON[morph-narwhal-monitorcenter svc5555 agent8888]
+  M_OPLOG[morph-narwhal-operlogcompact no-svc]
+  M_SUM[morph-narwhal-tradesummary svc7519 agent8888]
+  M_SUB[morph-sub-web svc8080]
 end
 
-%% =============== Moth（NEXS） ===============
-subgraph MOTH[Moth 命名空间（NEXS）]
-  N_GW[moth-nexs-gateway<br/>svc 8080]
-  N_MKT[moth-nexs-market<br/>svc 9090]
-  N_TRD[moth-nexs-trade<br/>svc 9090]
-  N_UC[moth-nexs-usercenter<br/>svc 9090]
+%% ===== Moth namespace =====
+subgraph MOTH[Moth NEXS]
+  N_GW[moth-nexs-gateway svc8080]
+  N_MKT[moth-nexs-market svc9090]
+  N_TRD[moth-nexs-trade svc9090]
+  N_UC[moth-nexs-usercenter svc9090]
 end
 
-%% =============== 数据层 / 中间件 ===============
-subgraph DATA[数据层 / 中间件]
-  SPOTDB[(spotdb.aie.prod<br/>RDS)]
-  SPOTREDIS[(spotredis.aie.prod<br/>Redis)]
-  KAFKA[(kafka.aie.prod:9092<br/>Kafka)]
-  FUTDB[(futuresnewdb.aie.prod<br/>RDS)]
-  FUTREDIS[(futuresnewredis.aie.prod:6379<br/>Redis)]
-  KAFKANEW[(kafkanew.aie.prod:9092<br/>Kafka)]
-  ETCDNEW[(etcdnew.aie.prod:2379<br/>Etcd)]
+%% ===== Data layer =====
+subgraph DATA[Data Layer]
+  SPOTDB[spotdb.aie.prod RDS]
+  SPOTREDIS[spotredis.aie.prod Redis]
+  KAFKA[kafka.aie.prod 9092 Kafka]
+  FUTDB[futuresnewdb.aie.prod RDS]
+  FUTREDIS[futuresnewredis.aie.prod 6379 Redis]
+  KAFKANEW[kafkanew.aie.prod 9092 Kafka]
+  ETCDNEW[etcdnew.aie.prod 2379 Etcd]
 end
 
-%% =============== APISIX 路由（域名/路径 → 上游） ===============
+%% ===== APISIX host path routing =====
 APISIX -->|www.allinpro.com /*| M_AWF_SPA
 APISIX -->|api.allinpro.com /*| L_SPOTAPI
 APISIX -->|api.allinpro.com /futures/web/api/*| M_FWEB
@@ -109,17 +109,17 @@ APISIX -->|user.allinpro.com /*| L_USER
 APISIX -->|ws.allinpro.com /ws*| L_SPOTWS
 APISIX -->|brokerserver.allinpro.com /*| L_BROKER_SVR
 APISIX -->|mackerel.aie.prod /api/*| L_ANEMONE
-APISIX -->|mackerel.aie.prod 或 mackerel.allinpro.com /*| L_MACK_SPA
-APISIX -->|*.aie.prod 内部域| M_ACCESSHTTP
+APISIX -->|mackerel.aie.prod or mackerel.allinpro.com /*| L_MACK_SPA
+APISIX -->|star aie prod internal| M_ACCESSHTTP
 
-%% =============== 现货域 → 数据层（已验证 + 常识推断） ===============
+%% ===== Landry deps =====
 L_SPOTAPI --> SPOTDB
 L_SPOTAPI --> SPOTREDIS
 L_SPOTAPI --> KAFKA
 L_SPOTWS --> SPOTREDIS
 L_USER -.-> SPOTDB
 
-%% =============== 合约域 → 数据层（常识推断，待坐实） ===============
+%% ===== Morph deps =====
 M_FWEB -.-> FUTDB
 M_FWEB -.-> FUTREDIS
 M_FWS -.-> FUTREDIS
@@ -129,17 +129,11 @@ M_FSCHED -.-> FUTDB
 M_ACCESSHTTP -.-> ETCDNEW
 M_ACCESSHTTP -.-> KAFKANEW
 
-%% =============== NEXS → 数据层（常识推断，待坐实） ===============
+%% ===== NEXS deps =====
 N_GW -.-> FUTDB
 N_MKT -.-> FUTDB
 N_TRD -.-> FUTDB
 N_UC -.-> FUTDB
-
-%% =============== 图例 / 入口说明 ===============
-NOTE1[[图例<br/>实线=由 kubectl / 你提供的输出验证<br/>虚线=依据现有文档的依赖推断 待路由/配置坐实]]
-NOTE2[[入口说明<br/>路径A: CloudFront → ALB(ap isix) → APISIX → 后端服务<br/>路径B: CloudFront → NLB(awf-spa-nlb) → morph-awf-spa]]
-APISIX --- NOTE1
-NLB_AWF --- NOTE2
 ```
 
 ---
