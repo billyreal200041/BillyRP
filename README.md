@@ -8,110 +8,108 @@
 
 ```mermaid
 flowchart LR
-    subgraph Internet[Internet]
-      U[终端用户/客户端]
+  %% 顶层
+  subgraph Internet[Internet]
+    U[终端用户/客户端]
+  end
+  U -->|FQDN| DNS[DNS: Route53/外部DNS]
+
+  subgraph Edge[CDN/边缘]
+    CF[CloudFront<br/>TLS 终止]
+  end
+  DNS --> CF
+
+  subgraph Entry[入口负载均衡]
+    ALB_PUB[ALB aie1p-apisix-public<br/>Hosts: www.allinpro.com, *.allinpro.com, *.allinx.io]
+    ALB_INT[ALB aie1p-apisix-internal<br/>Hosts: *.aie.prod]
+  end
+
+  CF --> ALB_PUB
+  DNS --> ALB_INT
+
+  APISIX[APISIX Gateway<br/>(EKS)]
+
+  ALB_PUB --> APISIX
+  ALB_INT --> APISIX
+
+  %% --- 业务域 ---
+  subgraph Spot[现货域 (landry)]
+    SPOTAPI[landry-spotapi-web]
+    SPOTWS[landry-spotws-web]
+    USERSVR[landry-userserver-web]
+    BROKER[landry-brokerserver-web]
+    MACK_SPA[landry-mackerel-spa]
+    ANEMONE[landry-anemone-web]
+    GATEWAY[landry-gateway-web]
+  end
+
+  subgraph Futures[合约域 (morph)]
+    AWF_SPA[morph-awf-spa]
+    FUT_WEB[morph-futuresweb-web]
+    FUT_OPEN[morph-futuresopen-web]
+    FUT_WS[morph-futuresws-app]
+    FUT_ADMIN[morph-futuresadmin-web]
+    FUT_MARKET[morph-futuresmarket-app]
+    NARW_ACC[morph-narwhal-accesshttp]
+  end
+
+  subgraph Nexs[NEXS (moth)]
+    NEXS_GW[moth-nexs-gateway]
+    NEXS_MKT[moth-nexs-market]
+    NEXS_TRD[moth-nexs-trade]
+    NEXS_UC[moth-nexs-usercenter]
+  end
+
+  %% --- 中间件 ---
+  subgraph Middleware[中间件/数据层]
+    subgraph LandryMW[现货中间件]
+      SPOTDB[(spotdb.aie.prod<br/>RDS)]
+      SPOTREDIS[(spotredis.aie.prod<br/>Redis)]
+      KAFKA[(kafka.aie.prod:9092<br/>Kafka)]
     end
-
-    U -->|FQDN| DNS[DNS: Route53/外部DNS]
-
-    subgraph Edge[CDN/边缘]
-      CF[CloudFront: TLS 终止]
+    subgraph MorphMW[合约中间件]
+      FUTDB[(futuresnewdb.aie.prod<br/>RDS)]
+      FUTREDIS[(futuresnewredis.aie.prod<br/>Redis)]
+      KAFKANEW[(kafkanew.aie.prod:9092<br/>Kafka)]
+      ETCDNEW[(etcdnew.aie.prod:2379<br/>Etcd)]
     end
+  end
 
-    DNS --> CF
+  %% --- APISIX 路由示意（标签文字仅用于说明） ---
+  APISIX -->|www.allinpro.com /*| AWF_SPA
+  APISIX -->|api.allinpro.com /*| SPOTAPI
+  APISIX -->|api.allinpro.com /futures/web/api/*| FUT_WEB
+  APISIX -->|api.allinpro.com /futuresopen/*| FUT_OPEN
+  APISIX -->|api.allinpro.com /futures/ws*| FUT_WS
+  APISIX -->|api.allinpro.com /moth-nexs-gateway/*| NEXS_GW
+  APISIX -->|user.allinpro.com /*| USERSVR
+  APISIX -->|ws.allinpro.com /ws*| SPOTWS
+  APISIX -->|brokerserver.allinpro.com /*| BROKER
+  APISIX -->|mackerel.aie.prod /api/*| ANEMONE
+  APISIX -->|mackerel.allinpro.com 或 mackerel.aie.prod /*| MACK_SPA
+  APISIX -->|*.aie.prod 内部域| NARW_ACC
 
-    subgraph Entry[入口负载均衡]
-      ALB_PUB[ALB: aie1p-apisix-public\nHosts: www.allinpro.com, *.allinpro.com, *.allinx.io]
-      ALB_INT[ALB: aie1p-apisix-internal\nHosts: *.aie.prod]
-    end
+  %% --- 业务到数据依赖 ---
+  SPOTAPI --> SPOTDB
+  SPOTAPI --> SPOTREDIS
+  SPOTAPI --> KAFKA
+  SPOTWS --> SPOTREDIS
+  USERSVR --> SPOTDB
 
-    CF --> ALB_PUB
-    DNS --> ALB_INT
+  AWF_SPA --> FUT_WEB
+  FUT_WEB --> FUTDB
+  FUT_WEB --> FUTREDIS
+  FUT_OPEN --> FUTDB
+  FUT_WS --> FUTREDIS
+  FUT_ADMIN --> FUTDB
+  FUT_ADMIN --> FUTREDIS
+  NARW_ACC --> ETCDNEW
+  NARW_ACC --> KAFKANEW
 
-    ALB_PUB --> APISIX[APISIX Gateway (EKS)]
-    ALB_INT --> APISIX
-
-    %% --- 路由到业务域 ---
-    subgraph Spot[现货域(Landry命名空间)]
-      SPOTAPI[landry-spotapi-web]
-      SPOTWS[landry-spotws-web]
-      USERSVR[landry-userserver-web]
-      BROKER[landry-brokerserver-web]
-      MACK_SPA[landry-mackerel-spa]
-      ANEMONE[landry-anemone-web]
-      GATEWAY[landry-gateway-web]
-    end
-
-    subgraph Futures[合约域(Morph命名空间)]
-      AWF_SPA[morph-awf-spa]
-      FUT_WEB[morph-futuresweb-web]
-      FUT_OPEN[morph-futuresopen-web]
-      FUT_WS[morph-futuresws-app]
-      FUT_ADMIN[morph-futuresadmin-web]
-      FUT_MARKET[morph-futuresmarket-app]
-      NARW_ACC[morph-narwhal-accesshttp]
-    end
-
-    subgraph Nexs[NEXS (Moth命名空间)]
-      NEXS_GW[moth-nexs-gateway]
-      NEXS_MKT[moth-nexs-market]
-      NEXS_TRD[moth-nexs-trade]
-      NEXS_UC[moth-nexs-usercenter]
-    end
-
-    %% --- 中间件 ---
-    subgraph Middleware[中间件/数据层]
-      subgraph LandryMW[现货中间件]
-        SPOTDB[(spotdb.aie.prod / RDS)]
-        SPOTREDIS[(spotredis.aie.prod / Redis)]
-        KAFKA[(kafka.aie.prod:9092)]
-      end
-      subgraph MorphMW[合约中间件]
-        FUTDB[(futuresnewdb.aie.prod / RDS)]
-        FUTREDIS[(futuresnewredis.aie.prod / Redis)]
-        KAFKANEW[(kafkanew.aie.prod:9092)]
-        ETCDNEW[(etcdnew.aie.prod:2379)]
-      end
-    end
-
-    %% --- APISIX 路由示意 ---
-    APISIX -->|www.allinpro.com /*| AWF_SPA
-    APISIX -->|api.allinpro.com /*| SPOTAPI
-    APISIX -->|api.allinpro.com /futures/web/api/*| FUT_WEB
-    APISIX -->|api.allinpro.com /futuresopen/*| FUT_OPEN
-    APISIX -->|api.allinpro.com /futures/ws*| FUT_WS
-    APISIX -->|api.allinpro.com /moth-nexs-gateway/*| NEXS_GW
-    APISIX -->|user.allinpro.com /*| USERSVR
-    APISIX -->|ws.allinpro.com /ws*| SPOTWS
-    APISIX -->|brokerserver.allinpro.com /*| BROKER
-    APISIX -->|mackerel.aie.prod /api/*| ANEMONE
-    APISIX -->|mackerel.(allinpro.com|aie.prod) /*| MACK_SPA
-    APISIX -->|*.aie.prod 内部域| NARW_ACC
-
-    %% --- 业务到数据依赖 ---
-    %% 现货
-    SPOTAPI --> SPOTDB
-    SPOTAPI --> SPOTREDIS
-    SPOTAPI --> KAFKA
-    SPOTWS --> SPOTREDIS
-    USERSVR --> SPOTDB
-
-    %% 合约
-    AWF_SPA --> FUT_WEB
-    FUT_WEB --> FUTDB
-    FUT_WEB --> FUTREDIS
-    FUT_OPEN --> FUTDB
-    FUT_WS --> FUTREDIS
-    FUT_ADMIN --> FUTDB
-    FUT_ADMIN --> FUTREDIS
-    NARW_ACC --> ETCDNEW
-    NARW_ACC --> KAFKANEW
-
-    %% NEXS
-    NEXS_GW --> FUTDB
-    NEXS_MKT --> FUTDB
-    NEXS_TRD --> FUTDB
-    NEXS_UC --> FUTDB
+  NEXS_GW --> FUTDB
+  NEXS_MKT --> FUTDB
+  NEXS_TRD --> FUTDB
+  NEXS_UC --> FUTDB
 ```
 
 ---
