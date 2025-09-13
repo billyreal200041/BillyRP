@@ -145,7 +145,6 @@ flowchart LR
   NOTE2[[入口说明：\nPath A：CloudFront→ALB(ap isix)→APISIX→后端服务\nPath B：CloudFront→NLB(awf-spa-nlb)→morph-awf-spa]]
   APISIX --- NOTE1
   NLB_AWF --- NOTE2
-
 ```
 
 ---
