@@ -7,188 +7,127 @@
 ## 1. 自顶向下的流量路径（概览图）
 
 ```mermaid
-%%{init: {"flowchart": {"htmlLabels": false, "useMaxWidth": true, "nodeSpacing": 8, "rankSpacing": 14}}}%%
+%%{init: {"flowchart": {"htmlLabels": false, "useMaxWidth": true, "nodeSpacing": 6, "rankSpacing": 10}}}%%
 flowchart TB
 
-subgraph ALL[Production Topology]
-direction TB
+%% ============ Single vertical chain ============
 
-%% ================= Entry =================
-subgraph ENTRY[Entry]
-direction TB
-u[Client];
-dns[DNS];
-cf[CloudFront];
-alb_pub[ALB apisix-public];
-alb_int[ALB apisix-internal];
-nlb_awf[NLB awf-spa-nlb 80 443 external];
-apisix[APISIX];
-u-->dns;
-dns-->cf;
-cf-->alb_pub;
-alb_pub-->apisix;
-dns-->alb_int;
-alb_int-->apisix;
-cf-->nlb_awf;
-end;
+u[Client]; dns[DNS]; cf[CloudFront]; alb_pub[ALB apisix-public]; alb_int[ALB apisix-internal]; apisix[APISIX];
+u-->dns; dns-->cf; cf-->alb_pub; alb_pub-->apisix; dns-->alb_int; alb_int-->apisix;
 
-%% NLB direct path
-nlb_awf-->m_awf_spa;
+%% NLB direct path (still on the same chain)
+nlb_awf[NLB awf-spa-nlb 80 443 external]; cf-->nlb_awf; 
+m_awf_spa[morph-awf-spa  svc8080]; nlb_awf-->m_awf_spa;
 
-%% ================= APISIX routing =================
-subgraph ROUTE[APISIX host & path routing]
-direction TB
-r_www[host www.allinpro.com];
-r_api_root[host api.allinpro.com  path /*];
-r_api_fweb[host api.allinpro.com  path /futures/web/api/*];
-r_api_fopen[host api.allinpro.com  path /futuresopen/*];
-r_api_fws[host api.allinpro.com  path /futures/ws*];
-r_api_nexs[host api.allinpro.com  path /moth-nexs-gateway/*];
-r_user[host user.allinpro.com  path /*];
-r_ws[host ws.allinpro.com  path /ws*];
-r_broker[host brokerserver.allinpro.com  path /*];
-r_mack_api[host mackerel.aie.prod  path /api/*];
-r_mack_fe[host mackerel.aie.prod or mackerel.allinpro.com  path /*];
-r_internal[host *.aie.prod internal];
-apisix-->r_www; r_www-->m_awf_spa;
-apisix-->r_api_root; r_api_root-->l_spotapi;
-apisix-->r_api_fweb; r_api_fweb-->m_fweb;
-apisix-->r_api_fopen; r_api_fopen-->m_fopen;
-apisix-->r_api_fws; r_api_fws-->m_fws;
-apisix-->r_api_nexs; r_api_nexs-->n_gw;
-apisix-->r_user; r_user-->l_user;
-apisix-->r_ws; r_ws-->l_spotws;
-apisix-->r_broker; r_broker-->l_broker_svr;
-apisix-->r_mack_api; r_mack_api-->l_anemone;
-apisix-->r_mack_fe; r_mack_fe-->l_mack_spa;
-apisix-->r_internal; r_internal-->m_accesshttp;
-end;
+%% APISIX routing entries, chained one-by-one (host -> path -> service)
+r_www_host[www.allinpro.com]; apisix-->r_www_host;
+r_www_path[/*]; r_www_host-->r_www_path; r_www_path-->m_awf_spa;
 
-%% ================= Landry split =================
-subgraph LANDRY_FE[Landry Frontend]
-direction TB
-l_apa_spa[landry-apa-spa  svc8080];
-l_awftest[landry-awftest-spa  svc8080];
-l_mack_spa[landry-mackerel-spa  svc8080];
-end;
+r_api_root_host[api.allinpro.com]; m_awf_spa-->r_api_root_host;
+r_api_root_path[/*]; r_api_root_host-->r_api_root_path;
+l_spotapi[landry-spotapi-web  svc8080]; r_api_root_path-->l_spotapi;
 
-subgraph LANDRY_API_WS[Landry API & WS]
-direction TB
-l_user[landry-userserver-web  svc8080];
-l_spotapi[landry-spotapi-web  svc8080];
-l_spottask[landry-spottask-web  svc8080];
-l_spotws[landry-spotws-web  svc8080];
-l_broker_svr[landry-brokerserver-web  NodePort 8080-30864];
-l_gateway[landry-gateway-web  svc8080];
-end;
+r_api_fweb_host[api.allinpro.com]; l_spotapi-->r_api_fweb_host;
+r_api_fweb_path[/futures/web/api/*]; r_api_fweb_host-->r_api_fweb_path;
+m_fweb[morph-futuresweb-web  svc8080]; r_api_fweb_path-->m_fweb;
 
-subgraph LANDRY_CES_A[Landry CES core A]
-direction TB
-l_ces_access[landry-ces-accesshttp  svc8080];
-l_ces_match[landry-ces-matchengine  svc7316];
-l_ces_mktpr[landry-ces-marketprice  svc7416];
-end;
+r_api_fopen_host[api.allinpro.com]; m_fweb-->r_api_fopen_host;
+r_api_fopen_path[/futuresopen/*]; r_api_fopen_host-->r_api_fopen_path;
+m_fopen[morph-futuresopen-web  svc8080]; r_api_fopen_path-->m_fopen;
 
-subgraph LANDRY_CES_B[Landry CES core B]
-direction TB
-l_ces_histw[landry-ces-historywriter  no-svc];
-l_ces_histr[landry-ces-historyreader  svc7516];
-l_ces_cache[landry-ces-cachecenter  svc7810 7811 7812 7813 7802 7803];
-l_ces_mon[landry-ces-monitorcenter  svc5555];
-l_ces_sum[landry-ces-tradesummary  svc7519];
-end;
+r_api_fws_host[api.allinpro.com]; m_fopen-->r_api_fws_host;
+r_api_fws_path[/futures/ws*]; r_api_fws_host-->r_api_fws_path;
+m_fws[morph-futuresws-app  svc8080]; r_api_fws_path-->m_fws;
 
-subgraph LANDRY_TOOLS[Landry tools & misc]
-direction TB
-l_anemone[landry-anemone-web  svc8080];
-l_clairvoy[landry-clairvoy-web  NodePort 8080-30906 9000-31816];
-l_cobocb[landry-cobocb-web  svc8080];
-l_cobogw[landry-cobogw-web  svc8080];
-l_trans[landry-trans-web  NodePort 8080-31603 9000-31562];
-l_tg_bot[landry-tgsggd-bot  no-port];
-end;
+r_api_nexs_host[api.allinpro.com]; m_fws-->r_api_nexs_host;
+r_api_nexs_path[/moth-nexs-gateway/*]; r_api_nexs_host-->r_api_nexs_path;
+n_gw[moth-nexs-gateway  svc8080]; r_api_nexs_path-->n_gw;
 
-%% ================= Morph split =================
-subgraph MORPH_FE[Morph Frontend]
-direction TB
-m_awf_spa[morph-awf-spa  svc8080];
-m_awftest[morph-awftest-spa  svc8080];
-end;
+r_user_host[user.allinpro.com]; n_gw-->r_user_host;
+r_user_path[/*]; r_user_host-->r_user_path;
+l_user[landry-userserver-web  svc8080]; r_user_path-->l_user;
 
-subgraph MORPH_WEB[Morph Web API & WS]
-direction TB
-m_fweb[morph-futuresweb-web  svc8080];
-m_fopen[morph-futuresopen-web  svc8080];
-m_fws[morph-futuresws-app  svc8080];
-m_fadmin[morph-futuresadmin-web  svc8080];
-m_fsched[morph-futuresschedule-app  svc8080];
-m_fmkt[morph-futuresmarket-app  svc8080];
-m_sub[morph-sub-web  svc8080];
-m_cond[morph-cond-web  svc8080];
-end;
+r_ws_host[ws.allinpro.com]; l_user-->r_ws_host;
+r_ws_path[/ws*]; r_ws_host-->r_ws_path;
+l_spotws[landry-spotws-web  svc8080]; r_ws_path-->l_spotws;
 
-subgraph NARWHAL_ACCESS[Narwhal access & control]
-direction TB
-m_accesshttp[morph-narwhal-accesshttp  svc8080  agent8888];
-m_mon[morph-narwhal-monitorcenter  svc5555  agent8888];
-m_alert[morph-narwhal-alertcenter  svc4444  agent8888];
-m_oplog[morph-narwhal-operlogcompact  no-svc];
-end;
+r_broker_host[brokerserver.allinpro.com]; l_spotws-->r_broker_host;
+r_broker_path[/*]; r_broker_host-->r_broker_path;
+l_broker_svr[landry-brokerserver-web  NodePort 8080-30864]; r_broker_path-->l_broker_svr;
 
-subgraph NARWHAL_MARKET[Narwhal market & history]
-direction TB
-m_mktidx[morph-narwhal-marketindex  svc7901  agent8888];
-m_mktpr[morph-narwhal-marketprice  svc7416  agent8888];
-m_match[morph-narwhal-matchengine  svc7316 8316  agent8888];
-m_cache[morph-narwhal-cachecenter  svc7810 7802 7803  agent8888];
-m_histw[morph-narwhal-historywriter  no-svc  agent8888];
-m_histr[morph-narwhal-historyreader  svc7516  agent8888];
-m_sum[morph-narwhal-tradesummary  svc7519  agent8888];
-end;
+r_mack_api_host[mackerel.aie.prod]; l_broker_svr-->r_mack_api_host;
+r_mack_api_path[/api/*]; r_mack_api_host-->r_mack_api_path;
+l_anemone[landry-anemone-web  svc8080]; r_mack_api_path-->l_anemone;
 
-%% ================= Moth NEXS =================
-subgraph MOTH_NEXS[Moth NEXS]
-direction TB
-n_gw[moth-nexs-gateway  svc8080];
-n_mkt[moth-nexs-market  svc9090];
-n_trd[moth-nexs-trade  svc9090];
-n_uc[moth-nexs-usercenter  svc9090];
-end;
+r_mack_fe_host[mackerel.aie.prod or mackerel.allinpro.com]; l_anemone-->r_mack_fe_host;
+r_mack_fe_path[/*]; r_mack_fe_host-->r_mack_fe_path;
+l_mack_spa[landry-mackerel-spa  svc8080]; r_mack_fe_path-->l_mack_spa;
 
-%% ================= Data Layer =================
-subgraph DATA[Data Layer]
-direction TB
-spotdb[spotdb.aie.prod  RDS];
+r_internal_host[*.aie.prod internal]; l_mack_spa-->r_internal_host;
+r_internal_path[/*]; r_internal_host-->r_internal_path;
+m_accesshttp[morph-narwhal-accesshttp  svc8080  agent8888]; r_internal_path-->m_accesshttp;
+
+%% Landry catalog (still chaining vertically)
+l_apa_spa[landry-apa-spa  svc8080]; m_accesshttp-->l_apa_spa;
+l_awftest[landry-awftest-spa  svc8080]; l_apa_spa-->l_awftest;
+l_spottask[landry-spottask-web  svc8080]; l_awftest-->l_spottask;
+l_gateway[landry-gateway-web  svc8080]; l_spottask-->l_gateway;
+
+l_ces_access[landry-ces-accesshttp  svc8080]; l_gateway-->l_ces_access;
+l_ces_match[landry-ces-matchengine  svc7316]; l_ces_access-->l_ces_match;
+l_ces_mktpr[landry-ces-marketprice  svc7416]; l_ces_match-->l_ces_mktpr;
+l_ces_histw[landry-ces-historywriter  no-svc]; l_ces_mktpr-->l_ces_histw;
+l_ces_histr[landry-ces-historyreader  svc7516]; l_ces_histw-->l_ces_histr;
+l_ces_cache[landry-ces-cachecenter  svc7810 7811 7812 7813 7802 7803]; l_ces_histr-->l_ces_cache;
+l_ces_mon[landry-ces-monitorcenter  svc5555]; l_ces_cache-->l_ces_mon;
+l_ces_sum[landry-ces-tradesummary  svc7519]; l_ces_mon-->l_ces_sum;
+
+l_clairvoy[landry-clairvoy-web  NodePort 8080-30906 9000-31816]; l_ces_sum-->l_clairvoy;
+l_cobocb[landry-cobocb-web  svc8080]; l_clairvoy-->l_cobocb;
+l_cobogw[landry-cobogw-web  svc8080]; l_cobocb-->l_cobogw;
+l_trans[landry-trans-web  NodePort 8080-31603 9000-31562]; l_cobogw-->l_trans;
+l_tg_bot[landry-tgsggd-bot  no-port]; l_trans-->l_tg_bot;
+
+%% Morph catalog (continuing down the chain)
+m_awftest[morph-awftest-spa  svc8080]; l_tg_bot-->m_awftest;
+m_fadmin[morph-futuresadmin-web  svc8080]; m_awftest-->m_fadmin;
+m_fsched[morph-futuresschedule-app  svc8080]; m_fadmin-->m_fsched;
+m_fmkt[morph-futuresmarket-app  svc8080]; m_fsched-->m_fmkt;
+m_sub[morph-sub-web  svc8080]; m_fmkt-->m_sub;
+m_cond[morph-cond-web  svc8080]; m_sub-->m_cond;
+
+m_mon[morph-narwhal-monitorcenter  svc5555  agent8888]; m_cond-->m_mon;
+m_alert[morph-narwhal-alertcenter  svc4444  agent8888]; m_mon-->m_alert;
+m_oplog[morph-narwhal-operlogcompact  no-svc]; m_alert-->m_oplog;
+
+m_mktidx[morph-narwhal-marketindex  svc7901  agent8888]; m_oplog-->m_mktidx;
+m_mktpr[morph-narwhal-marketprice  svc7416  agent8888]; m_mktidx-->m_mktpr;
+m_match[morph-narwhal-matchengine  svc7316 8316  agent8888]; m_mktpr-->m_match;
+m_cache[morph-narwhal-cachecenter  svc7810 7802 7803  agent8888]; m_match-->m_cache;
+m_histw[morph-narwhal-historywriter  no-svc  agent8888]; m_cache-->m_histw;
+m_histr[morph-narwhal-historyreader  svc7516  agent8888]; m_histw-->m_histr;
+m_sum[morph-narwhal-tradesummary  svc7519  agent8888]; m_histr-->m_sum;
+
+%% Moth NEXS catalog
+n_mkt[moth-nexs-market  svc9090]; m_sum-->n_mkt;
+n_trd[moth-nexs-trade  svc9090]; n_mkt-->n_trd;
+n_uc[moth-nexs-usercenter  svc9090]; n_trd-->n_uc;
+
+%% Data layer at bottom
+spotdb[spotdb.aie.prod  RDS]; n_uc-->spotdb;
 spotredis[spotredis.aie.prod  Redis];
 kafka[kafka.aie.prod 9092  Kafka];
 futdb[futuresnewdb.aie.prod  RDS];
 futredis[futuresnewredis.aie.prod 6379  Redis];
 kafkanew[kafkanew.aie.prod 9092  Kafka];
 etcdnew[etcdnew.aie.prod 2379  Etcd];
-end;
 
-%% ================= Dependencies =================
-l_spotapi-->spotdb;
-l_spotapi-->spotredis;
-l_spotapi-->kafka;
-l_spotws-->spotredis;
-l_user-.->spotdb;
+%% Dependencies (downwards only)
+l_spotapi-->spotdb; l_spotapi-->spotredis; l_spotapi-->kafka; l_spotws-->spotredis; 
+m_fweb-.->futdb; m_fweb-.->futredis; m_fws-.->futredis; m_fopen-.->futdb; m_fadmin-.->futdb; m_fsched-.->futdb;
+m_accesshttp-.->etcdnew; m_accesshttp-.->kafkanew; 
+n_gw-.->futdb; n_mkt-.->futdb; n_trd-.->futdb; n_uc-.->futdb;
 
-m_fweb-.->futdb;
-m_fweb-.->futredis;
-m_fws-.->futredis;
-m_fopen-.->futdb;
-m_fadmin-.->futdb;
-m_fsched-.->futdb;
-m_accesshttp-.->etcdnew;
-m_accesshttp-.->kafkanew;
-
-n_gw-.->futdb;
-n_mkt-.->futdb;
-n_trd-.->futdb;
-n_uc-.->futdb;
-
-end;
 ```
 
 ---
