@@ -8,89 +8,144 @@
 
 ```mermaid
 flowchart LR
-  %% 顶层节点
-  U[用户]
+%% ===================== 顶层入口（DNS/CDN/LB/GW） =====================
+  U[用户/客户端]
   DNS[DNS]
   CF[CloudFront]
-  ALB_PUB[ALB public]
-  ALB_INT[ALB internal]
-  APISIX[APISIX Gateway]
+  ALB_PUB[ALB aie1p-apisix-public]
+  ALB_INT[ALB aie1p-apisix-internal]
+  NLB_AWF[NLB awf-spa-nlb\n80,443 外网]
+  APISIX[APISIX 网关]
+  INGRESS_NGX[ingress-nginx-controller\nCI:80,443]
 
-  U -->|FQDN| DNS --> CF --> ALB_PUB --> APISIX
-  DNS --> ALB_INT --> APISIX
+  U --> DNS --> CF
+  CF --> ALB_PUB
+  DNS --> ALB_INT
+  CF --> NLB_AWF
+  ALB_PUB --> APISIX
+  ALB_INT --> APISIX
+  NLB_AWF --> M_AWF_SPA
 
-  %% 业务域
-  subgraph Spot[现货域 landry]
-    SPOTAPI[landry-spotapi-web]
-    SPOTWS[landry-spotws-web]
-    USERSVR[landry-userserver-web]
-    BROKER[landry-brokerserver-web]
-    MACK_SPA[landry-mackerel-spa]
-    ANEMONE[landry-anemone-web]
+%% ===================== Landry（现货域） =====================
+  subgraph LANDRY[Landry 命名空间（现货域）]
+    L_ANEMONE[landry-anemone-web\nCI:8080]
+    L_APA_SPA[landry-apa-spa\nCI:8080]
+    L_AWFTEST[landry-awftest-spa\nCI:8080]
+    L_BROKER_SVR[landry-brokerserver-web\nNodePort 8080→30864]
+    L_CES_ACCESS[landry-ces-accesshttp\nCI:8080]
+    L_CES_CACHE[landry-ces-cachecenter\nCI:7810,7811,7812,7813,7802,7803]
+    L_CES_HISTR[landry-ces-historyreader\nCI:7516]
+    L_CES_HISTW[landry-ces-historywriter\n(无 svc 暴露)]
+    L_CES_MKTPR[landry-ces-marketprice\nCI:7416]
+    L_CES_MATCH[landry-ces-matchengine\nCI:7316]
+    L_CES_MON[landry-ces-monitorcenter\nCI:5555]
+    L_CES_SUM[landry-ces-tradesummary\nCI:7519]
+    L_CLAIRVOY[landry-clairvoy-web\nNodePort 8080→30906,9000→31816]
+    L_COBOCB[landry-cobocb-web\nCI:8080]
+    L_COBOGW[landry-cobogw-web\nCI:8080]
+    L_GATEWAY[landry-gateway-web\nCI:8080]
+    L_MACK_SPA[landry-mackerel-spa\nCI:8080]
+    L_SPOTAPI[landry-spotapi-web\nCI:8080]
+    L_SPOTTASK[landry-spottask-web\nCI:8080]
+    L_SPOTWS[landry-spotws-web\nCI:8080]
+    L_TG_BOT[landry-tgsggd-bot\n(无端口)]
+    L_TRANS[landry-trans-web\nNodePort 8080→31603,9000→31562]
+    L_USER[landry-userserver-web\nCI:8080]
   end
 
-  subgraph Futures[合约域 morph]
-    AWF_SPA[morph-awf-spa]
-    FUT_WEB[morph-futuresweb-web]
-    FUT_OPEN[morph-futuresopen-web]
-    FUT_WS[morph-futuresws-app]
-    FUT_ADMIN[morph-futuresadmin-web]
-    FUT_MARKET[morph-futuresmarket-app]
-    NARW_ACC[morph-narwhal-accesshttp]
+%% ===================== Morph（合约域） =====================
+  subgraph MORPH[Morph 命名空间（合约域）]
+    M_AWF_SPA[morph-awf-spa\nCI:8080]
+    M_AWFTEST[morph-awftest-spa\nCI:8080]
+    M_COND[morph-cond-web\nCI:8080]
+    M_FADMIN[morph-futuresadmin-web\nCI:8080]
+    M_FMKT[morph-futuresmarket-app\nCI:8080]
+    M_FOPEN[morph-futuresopen-web\nCI:8080]
+    M_FSCHED[morph-futuresschedule-app\nCI:8080]
+    M_FWEB[morph-futuresweb-web\nCI:8080]
+    M_FWS[morph-futuresws-app\nCI:8080]
+    M_ACCESSHTTP[morph-narwhal-accesshttp\nCI:8080 + agent:8888]
+    M_ALERT[morph-narwhal-alertcenter\nCI:4444 +8888]
+    M_CACHE[morph-narwhal-cachecenter\nCI:7810,7802,7803 +8888]
+    M_HISTR[morph-narwhal-historyreader\nCI:7516 +8888]
+    M_HISTW[morph-narwhal-historywriter\n(无 svc) +8888]
+    M_MKTIDX[morph-narwhal-marketindex\nCI:7901 +8888]
+    M_MKTPR[morph-narwhal-marketprice\nCI:7416 +8888]
+    M_MATCH[morph-narwhal-matchengine\nCI:7316,8316 +8888]
+    M_MON[morph-narwhal-monitorcenter\nCI:5555 +8888]
+    M_OPLOG[morph-narwhal-operlogcompact\n(无 svc)]
+    M_SUM[morph-narwhal-tradesummary\nCI:7519 +8888]
+    M_SUB[morph-sub-web\nCI:8080]
   end
 
-  subgraph Nexs[NEXS moth]
-    NEXS_GW[moth-nexs-gateway]
-    NEXS_MKT[moth-nexs-market]
-    NEXS_TRD[moth-nexs-trade]
-    NEXS_UC[moth-nexs-usercenter]
+%% ===================== Moth（NEXS） =====================
+  subgraph MOTH[Moth 命名空间（NEXS）]
+    N_GW[moth-nexs-gateway\nCI:8080]
+    N_MKT[moth-nexs-market\nCI:9090]
+    N_TRD[moth-nexs-trade\nCI:9090]
+    N_UC[moth-nexs-usercenter\nCI:9090]
   end
 
-  %% 中间件/数据层
-  subgraph MW[中间件/数据层]
-    SPOTDB[(spotdb.aie.prod RDS)]
-    SPOTREDIS[(spotredis.aie.prod Redis)]
-    KAFKA[(kafka.aie.prod:9092)]
-    FUTDB[(futuresnewdb.aie.prod RDS)]
-    FUTREDIS[(futuresnewredis.aie.prod Redis)]
-    KAFKANEW[(kafkanew.aie.prod:9092)]
-    ETCDNEW[(etcdnew.aie.prod:2379)]
+%% ===================== 数据层与中间件 =====================
+  subgraph DATA[数据层 / 中间件]
+    SPOTDB[(spotdb.aie.prod\nRDS)]
+    SPOTREDIS[(spotredis.aie.prod\nRedis)]
+    KAFKA[(kafka.aie.prod:9092\nKafka)]
+
+    FUTDB[(futuresnewdb.aie.prod\nRDS)]
+    FUTREDIS[(futuresnewredis.aie.prod:6379\nRedis)]
+    KAFKANEW[(kafkanew.aie.prod:9092\nKafka)]
+    ETCDNEW[(etcdnew.aie.prod:2379\nEtcd)]
   end
 
-  %% 路由示意（标签仅说明）
-  APISIX -->|www.allinpro.com /*| AWF_SPA
-  APISIX -->|api.allinpro.com /*| SPOTAPI
-  APISIX -->|api.allinpro.com /futures/web/api/*| FUT_WEB
-  APISIX -->|api.allinpro.com /futuresopen/*| FUT_OPEN
-  APISIX -->|api.allinpro.com /futures/ws*| FUT_WS
-  APISIX -->|api.allinpro.com /moth-nexs-gateway/*| NEXS_GW
-  APISIX -->|user.allinpro.com /*| USERSVR
-  APISIX -->|ws.allinpro.com /ws*| SPOTWS
-  APISIX -->|brokerserver.allinpro.com /*| BROKER
-  APISIX -->|mackerel.aie.prod /api/*| ANEMONE
-  APISIX -->|mackerel.allinpro.com 或 mackerel.aie.prod /*| MACK_SPA
-  APISIX -->|*.aie.prod 内部域| NARW_ACC
+%% ===================== APISIX 路由（域名/路径 → 上游） =====================
+  APISIX -->|www.allinpro.com /*| M_AWF_SPA
+  APISIX -->|api.allinpro.com /*| L_SPOTAPI
+  APISIX -->|api.allinpro.com /futures/web/api/*| M_FWEB
+  APISIX -->|api.allinpro.com /futuresopen/*| M_FOPEN
+  APISIX -->|api.allinpro.com /futures/ws*| M_FWS
+  APISIX -->|api.allinpro.com /moth-nexs-gateway/*| N_GW
+  APISIX -->|user.allinpro.com /*| L_USER
+  APISIX -->|ws.allinpro.com /ws*| L_SPOTWS
+  APISIX -->|brokerserver.allinpro.com /*| L_BROKER_SVR
+  APISIX -->|mackerel.aie.prod /api/*| L_ANEMONE
+  APISIX -->|mackerel.aie.prod 或 mackerel.allinpro.com /*| L_MACK_SPA
+  APISIX -->|*.aie.prod（内部）| M_ACCESSHTTP
 
-  %% 依赖
-  SPOTAPI --> SPOTDB
-  SPOTAPI --> SPOTREDIS
-  SPOTAPI --> KAFKA
-  SPOTWS --> SPOTREDIS
-  USERSVR --> SPOTDB
+%% ===================== 现货域 业务 → 数据层（已验证 + 推断） =====================
+  %% 已验证（由你的输出与既有说明综合）
+  L_SPOTAPI --> SPOTDB
+  L_SPOTAPI --> SPOTREDIS
+  L_SPOTAPI --> KAFKA
+  L_SPOTWS --> SPOTREDIS
 
-  FUT_WEB --> FUTDB
-  FUT_WEB --> FUTREDIS
-  FUT_OPEN --> FUTDB
-  FUT_WS --> FUTREDIS
-  FUT_ADMIN --> FUTDB
-  FUT_ADMIN --> FUTREDIS
-  NARW_ACC --> ETCDNEW
-  NARW_ACC --> KAFKANEW
+  %% 可能的依赖（基于文档的常识推断，待 CM/Secret/代码配置坐实）
+  L_USER -.-> SPOTDB
 
-  NEXS_GW --> FUTDB
-  NEXS_MKT --> FUTDB
-  NEXS_TRD --> FUTDB
-  NEXS_UC --> FUTDB
+%% ===================== 合约域 业务 → 数据层（文档推断，待坐实） =====================
+  M_FWEB -.-> FUTDB
+  M_FWEB -.-> FUTREDIS
+  M_FWS -.-> FUTREDIS
+  M_FOPEN -.-> FUTDB
+  M_FADMIN -.-> FUTDB
+  M_FSCHED -.-> FUTDB
+
+  %% Narwhal 侧（接入/撮合/行情/历史 等）
+  M_ACCESSHTTP -.-> ETCDNEW
+  M_ACCESSHTTP -.-> KAFKANEW
+
+%% ===================== NEXS → 数据层（文档推断，待坐实） =====================
+  N_GW -.-> FUTDB
+  N_MKT -.-> FUTDB
+  N_TRD -.-> FUTDB
+  N_UC -.-> FUTDB
+
+%% ===================== 备注/图例 =====================
+  NOTE1[[图例：\n实线=已由集群/服务输出验证\n虚线=来自现有文档的依赖推断（待 APISIX/CloudFront/配置坐实）]]
+  NOTE2[[入口说明：\nPath A：CloudFront→ALB(ap isix)→APISIX→后端服务\nPath B：CloudFront→NLB(awf-spa-nlb)→morph-awf-spa]]
+  APISIX --- NOTE1
+  NLB_AWF --- NOTE2
+
 ```
 
 ---
