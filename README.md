@@ -6,6 +6,252 @@
 
 ## 1. 自顶向下的流量路径（概览图）
 
+<div align="center">
+digraph G {
+  graph [rankdir=TB, splines=true, nodesep=0.15, ranksep=0.22, fontsize=10, fontname="Arial", compound=true];
+  node  [shape=box, fontsize=9, fontname="Arial"];
+  edge  [fontsize=8, fontname="Arial"];
+
+  /* ============== Entry ============== */
+  subgraph cluster_entry {
+    label="Entry"; labelloc=t; fontsize=11;
+    u       [label="Client"];
+    dns     [label="DNS"];
+    cf      [label="CloudFront"];
+    alb_pub [label="ALB apisix-public"];
+    alb_int [label="ALB apisix-internal"];
+    nlb_awf [label="NLB awf-spa-nlb\nports 80,443 external"];
+    apisix  [label="APISIX"];
+    ingress_ng [label="ingress-nginx-controller\nsvc 80,443"];
+
+    u   -> dns -> cf;
+    cf  -> alb_pub -> apisix;
+    dns -> alb_int -> apisix;
+    cf  -> nlb_awf;
+  }
+
+  /* NLB 直连目标（与主链相连，保持纵向） */
+  m_awf_spa [label="morph-awf-spa\nsvc 8080"];
+  nlb_awf -> m_awf_spa;
+
+  /* ============== APISIX 路由条目（竖向串联） ============== */
+  subgraph cluster_route {
+    label="APISIX host & path routing"; labelloc=t; fontsize=11;
+
+    r_www_host       [label="host www.allinpro.com"];
+    r_www_path       [label="path /*"];
+    r_api_root_host  [label="host api.allinpro.com"];
+    r_api_root_path  [label="path /*"];
+    r_api_fweb_host  [label="host api.allinpro.com"];
+    r_api_fweb_path  [label="path /futures/web/api/*"];
+    r_api_fopen_host [label="host api.allinpro.com"];
+    r_api_fopen_path [label="path /futuresopen/*"];
+    r_api_fws_host   [label="host api.allinpro.com"];
+    r_api_fws_path   [label="path /futures/ws*"];
+    r_api_nexs_host  [label="host api.allinpro.com"];
+    r_api_nexs_path  [label="path /moth-nexs-gateway/*"];
+    r_user_host      [label="host user.allinpro.com"];
+    r_user_path      [label="path /*"];
+    r_ws_host        [label="host ws.allinpro.com"];
+    r_ws_path        [label="path /ws*"];
+    r_broker_host    [label="host brokerserver.allinpro.com"];
+    r_broker_path    [label="path /*"];
+    r_mack_api_host  [label="host mackerel.aie.prod"];
+    r_mack_api_path  [label="path /api/*"];
+    r_mack_fe_host   [label="host mackerel.aie.prod or mackerel.allinpro.com"];
+    r_mack_fe_path   [label="path /*"];
+    r_internal_host  [label="host *.aie.prod internal"];
+    r_internal_path  [label="path /*"];
+  }
+
+  /* 路由链（竖向） */
+  apisix -> r_www_host -> r_www_path -> m_awf_spa;
+  m_awf_spa -> r_api_root_host -> r_api_root_path;
+  l_spotapi [label="landry-spotapi-web\nsvc 8080"];
+  r_api_root_path -> l_spotapi;
+
+  l_spotapi -> r_api_fweb_host -> r_api_fweb_path;
+  m_fweb [label="morph-futuresweb-web\nsvc 8080"];
+  r_api_fweb_path -> m_fweb;
+
+  m_fweb -> r_api_fopen_host -> r_api_fopen_path;
+  m_fopen [label="morph-futuresopen-web\nsvc 8080"];
+  r_api_fopen_path -> m_fopen;
+
+  m_fopen -> r_api_fws_host -> r_api_fws_path;
+  m_fws [label="morph-futuresws-app\nsvc 8080"];
+  r_api_fws_path -> m_fws;
+
+  m_fws -> r_api_nexs_host -> r_api_nexs_path;
+  n_gw [label="moth-nexs-gateway\nsvc 8080"];
+  r_api_nexs_path -> n_gw;
+
+  n_gw -> r_user_host -> r_user_path;
+  l_user [label="landry-userserver-web\nsvc 8080"];
+  r_user_path -> l_user;
+
+  l_user -> r_ws_host -> r_ws_path;
+  l_spotws [label="landry-spotws-web\nsvc 8080"];
+  r_ws_path -> l_spotws;
+
+  l_spotws -> r_broker_host -> r_broker_path;
+  l_broker_svr [label="landry-brokerserver-web\nNodePort 8080→30864"];
+  r_broker_path -> l_broker_svr;
+
+  l_broker_svr -> r_mack_api_host -> r_mack_api_path;
+  l_anemone [label="landry-anemone-web\nsvc 8080"];
+  r_mack_api_path -> l_anemone;
+
+  l_anemone -> r_mack_fe_host -> r_mack_fe_path;
+  l_mack_spa [label="landry-mackerel-spa\nsvc 8080"];
+  r_mack_fe_path -> l_mack_spa;
+
+  l_mack_spa -> r_internal_host -> r_internal_path;
+  m_accesshttp [label="morph-narwhal-accesshttp\nsvc 8080  agent 8888"];
+  r_internal_path -> m_accesshttp;
+
+  /* ============== Landry 列表（继续竖向串联） ============== */
+  subgraph cluster_landry_fe {
+    label="Landry Frontend"; labelloc=t; fontsize=11;
+    l_apa_spa  [label="landry-apa-spa\nsvc 8080"];
+    l_awftest  [label="landry-awftest-spa\nsvc 8080"];
+    l_mack_spa_dup [label="landry-mackerel-spa\nsvc 8080"]; /* 展示于分组内的重复视图 */
+  }
+  m_accesshttp -> l_apa_spa -> l_awftest -> l_mack_spa_dup;
+
+  subgraph cluster_landry_api_ws {
+    label="Landry API & WS"; labelloc=t; fontsize=11;
+    l_spottask [label="landry-spottask-web\nsvc 8080"];
+    l_gateway  [label="landry-gateway-web\nsvc 8080"];
+  }
+  l_mack_spa_dup -> l_spotapi -> l_spottask -> l_gateway -> l_spotws -> l_broker_svr;
+
+  subgraph cluster_landry_ces_a {
+    label="Landry CES core A"; labelloc=t; fontsize=11;
+    l_ces_access [label="landry-ces-accesshttp\nsvc 8080"];
+    l_ces_match  [label="landry-ces-matchengine\nsvc 7316"];
+    l_ces_mktpr  [label="landry-ces-marketprice\nsvc 7416"];
+  }
+  l_broker_svr -> l_ces_access -> l_ces_match -> l_ces_mktpr;
+
+  subgraph cluster_landry_ces_b {
+    label="Landry CES core B"; labelloc=t; fontsize=11;
+    l_ces_histw [label="landry-ces-historywriter\nno svc"];
+    l_ces_histr [label="landry-ces-historyreader\nsvc 7516"];
+    l_ces_cache [label="landry-ces-cachecenter\nsvc 7810,7811,7812,7813,7802,7803"];
+    l_ces_mon   [label="landry-ces-monitorcenter\nsvc 5555"];
+    l_ces_sum   [label="landry-ces-tradesummary\nsvc 7519"];
+  }
+  l_ces_mktpr -> l_ces_histw -> l_ces_histr -> l_ces_cache -> l_ces_mon -> l_ces_sum;
+
+  subgraph cluster_landry_tools {
+    label="Landry tools & misc"; labelloc=t; fontsize=11;
+    l_clairvoy [label="landry-clairvoy-web\nNodePort 8080→30906, 9000→31816"];
+    l_cobocb   [label="landry-cobocb-web\nsvc 8080"];
+    l_cobogw   [label="landry-cobogw-web\nsvc 8080"];
+    l_trans    [label="landry-trans-web\nNodePort 8080→31603, 9000→31562"];
+    l_tg_bot   [label="landry-tgsggd-bot\nno port"];
+  }
+  l_ces_sum -> l_clairvoy -> l_cobocb -> l_cobogw -> l_trans -> l_tg_bot;
+
+  /* Landry brokercron 任务（完整列出，挂在工具组之后，保持竖向） */
+  subgraph cluster_landry_cron {
+    label="Landry brokercron"; labelloc=t; fontsize=11;
+    lc_daily_report [label="landry-brokercron-broker-daily-report"];
+    lc_rebate       [label="landry-brokercron-rebate"];
+    lc_rebate_settle[label="landry-brokercron-rebate-daily-settlement"];
+    lc_snap_balance [label="landry-brokercron-snap-user-balance"];
+    lc_stat_trade   [label="landry-brokercron-stat-user-trade"];
+    lc_sync_fee     [label="landry-brokercron-sync-match-fee"];
+    lc_sync_position[label="landry-brokercron-sync-position"];
+    lc_sync_user_match   [label="landry-brokercron-sync-user-match"];
+    lc_sync_user_relation[label="landry-brokercron-sync-user-relationship"];
+  }
+  l_tg_bot -> lc_daily_report -> lc_rebate -> lc_rebate_settle -> lc_snap_balance -> lc_stat_trade -> lc_sync_fee -> lc_sync_position -> lc_sync_user_match -> lc_sync_user_relation;
+
+  /* ============== Morph 列表（继续竖向） ============== */
+  subgraph cluster_morph_fe {
+    label="Morph Frontend"; labelloc=t; fontsize=11;
+    m_awftest [label="morph-awftest-spa\nsvc 8080"];
+  }
+  lc_sync_user_relation -> m_awftest;
+
+  subgraph cluster_morph_web {
+    label="Morph Web API & WS"; labelloc=t; fontsize=11;
+    m_fadmin [label="morph-futuresadmin-web\nsvc 8080"];
+    m_fsched [label="morph-futuresschedule-app\nsvc 8080"];
+    m_fmkt   [label="morph-futuresmarket-app\nsvc 8080"];
+    m_sub    [label="morph-sub-web\nsvc 8080"];
+    m_cond   [label="morph-cond-web\nsvc 8080"];
+  }
+  m_awftest -> m_fweb -> m_fopen -> m_fws -> m_fadmin -> m_fsched -> m_fmkt -> m_sub -> m_cond;
+
+  subgraph cluster_narwhal_access {
+    label="Narwhal access & control"; labelloc=t; fontsize=11;
+    m_mon   [label="morph-narwhal-monitorcenter\nsvc 5555  agent 8888"];
+    m_alert [label="morph-narwhal-alertcenter\nsvc 4444  agent 8888"];
+    m_oplog [label="morph-narwhal-operlogcompact\nno svc"];
+  }
+  m_cond -> m_accesshttp -> m_mon -> m_alert -> m_oplog;
+
+  subgraph cluster_narwhal_market {
+    label="Narwhal market & history"; labelloc=t; fontsize=11;
+    m_mktidx [label="morph-narwhal-marketindex\nsvc 7901  agent 8888"];
+    m_mktpr  [label="morph-narwhal-marketprice\nsvc 7416  agent 8888"];
+    m_match  [label="morph-narwhal-matchengine\nsvc 7316,8316  agent 8888"];
+    m_cache  [label="morph-narwhal-cachecenter\nsvc 7810,7802,7803  agent 8888"];
+    m_histw  [label="morph-narwhal-historywriter\nno svc  agent 8888"];
+    m_histr  [label="morph-narwhal-historyreader\nsvc 7516  agent 8888"];
+    m_sum    [label="morph-narwhal-tradesummary\nsvc 7519  agent 8888"];
+  }
+  m_oplog -> m_mktidx -> m_mktpr -> m_match -> m_cache -> m_histw -> m_histr -> m_sum;
+
+  /* ============== Moth NEXS（继续竖向） ============== */
+  subgraph cluster_moth {
+    label="Moth NEXS"; labelloc=t; fontsize=11;
+    n_mkt [label="moth-nexs-market\nsvc 9090"];
+    n_trd [label="moth-nexs-trade\nsvc 9090"];
+    n_uc  [label="moth-nexs-usercenter\nsvc 9090"];
+  }
+  m_sum -> n_gw -> n_mkt -> n_trd -> n_uc;
+
+  /* ============== 数据层（底部） ============== */
+  subgraph cluster_data {
+    label="Data Layer"; labelloc=t; fontsize=11;
+    spotdb   [label="spotdb.aie.prod\nRDS", shape=cylinder];
+    spotredis[label="spotredis.aie.prod\nRedis", shape=cylinder];
+    kafka    [label="kafka.aie.prod:9092\nKafka", shape=cylinder];
+    futdb    [label="futuresnewdb.aie.prod\nRDS", shape=cylinder];
+    futredis [label="futuresnewredis.aie.prod:6379\nRedis", shape=cylinder];
+    kafkanew [label="kafkanew.aie.prod:9092\nKafka", shape=cylinder];
+    etcdnew  [label="etcdnew.aie.prod:2379\nEtcd", shape=cylinder];
+  }
+  n_uc -> spotdb;
+
+  /* ============== 已验证/推断依赖（尽量向下） ============== */
+  l_spotapi -> spotdb;
+  l_spotapi -> spotredis;
+  l_spotapi -> kafka;
+  l_spotws  -> spotredis;
+
+  m_fweb    -> futdb    [style=dashed];
+  m_fweb    -> futredis [style=dashed];
+  m_fws     -> futredis [style=dashed];
+  m_fopen   -> futdb    [style=dashed];
+  m_fadmin  -> futdb    [style=dashed];
+  m_fsched  -> futdb    [style=dashed];
+
+  m_accesshttp -> etcdnew  [style=dashed];
+  m_accesshttp -> kafkanew [style=dashed];
+
+  n_gw  -> futdb [style=dashed];
+  n_mkt -> futdb [style=dashed];
+  n_trd -> futdb [style=dashed];
+  n_uc  -> futdb [style=dashed];
+}
+</div>
+
+
 ```mermaid
 %%{init: {"flowchart": {"htmlLabels": false, "useMaxWidth": true, "nodeSpacing": 6, "rankSpacing": 8}}}%%
 flowchart TB
