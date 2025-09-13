@@ -134,13 +134,6 @@ N_GW -.-> FUTDB
 N_MKT -.-> FUTDB
 N_TRD -.-> FUTDB
 N_UC -.-> FUTDB
-
-%% =============== 图例 / 入口说明 ===============
-NOTE1[[图例<br/>实线=由 kubectl / 你提供的输出验证<br/>虚线=依据现有文档的依赖推断 待路由/配置坐实]]
-NOTE2[[入口说明<br/>路径A: CloudFront → ALB(ap isix) → APISIX → 后端服务<br/>路径B: CloudFront → NLB(awf-spa-nlb) → morph-awf-spa]]
-APISIX --- NOTE1
-NLB_AWF --- NOTE2
-
 ```
 
 ---
