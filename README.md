@@ -9,7 +9,9 @@
 ```mermaid
 flowchart TB
 
-%% ===== Top Entry =====
+%% ================= Top Entry (vertical) =================
+subgraph ENTRY[Entry]
+direction TB
 U[Client]
 DNS[DNS]
 CF[CloudFront]
@@ -18,122 +20,150 @@ ALB_INT[ALB apisix-internal]
 NLB_AWF[NLB awf-spa-nlb 80 443 external]
 APISIX[APISIX]
 INGRESS_NGX[ingress-nginx-controller svc80 443]
-
 U-->DNS-->CF
-CF-->ALB_PUB
-DNS-->ALB_INT
+CF-->ALB_PUB-->APISIX
+DNS-->ALB_INT-->APISIX
 CF-->NLB_AWF
-ALB_PUB-->APISIX
-ALB_INT-->APISIX
+end
+
+%% NLB direct to awf-spa
 NLB_AWF-->M_AWF_SPA
 
-%% ===== Landry namespace =====
-subgraph LANDRY[Landry]
-  L_ANEMONE[landry-anemone-web svc8080]
-  L_APA_SPA[landry-apa-spa svc8080]
-  L_AWFTEST[landry-awftest-spa svc8080]
-  L_BROKER_SVR[landry-brokerserver-web NodePort 8080-30864]
-  L_CES_ACCESS[landry-ces-accesshttp svc8080]
-  L_CES_CACHE[landry-ces-cachecenter svc7810 7811 7812 7813 7802 7803]
-  L_CES_HISTR[landry-ces-historyreader svc7516]
-  L_CES_HISTW[landry-ces-historywriter no-svc]
-  L_CES_MKTPR[landry-ces-marketprice svc7416]
-  L_CES_MATCH[landry-ces-matchengine svc7316]
-  L_CES_MON[landry-ces-monitorcenter svc5555]
-  L_CES_SUM[landry-ces-tradesummary svc7519]
-  L_CLAIRVOY[landry-clairvoy-web NodePort 8080-30906 9000-31816]
-  L_COBOCB[landry-cobocb-web svc8080]
-  L_COBOGW[landry-cobogw-web svc8080]
-  L_GATEWAY[landry-gateway-web svc8080]
-  L_MACK_SPA[landry-mackerel-spa svc8080]
-  L_SPOTAPI[landry-spotapi-web svc8080]
-  L_SPOTTASK[landry-spottask-web svc8080]
-  L_SPOTWS[landry-spotws-web svc8080]
-  L_TG_BOT[landry-tgsggd-bot no-port]
-  L_TRANS[landry-trans-web NodePort 8080-31603 9000-31562]
-  L_USER[landry-userserver-web svc8080]
+%% ================= APISIX Routing (vertical lane) =================
+subgraph ROUTE[APISIX host path routing]
+direction TB
+APISIX-->H_WWW[www.allinpro.com]
+H_WWW-->M_AWF_SPA
+
+APISIX-->H_API_DEF[api.allinpro.com root]
+H_API_DEF-->L_SPOTAPI
+
+APISIX-->H_API_FWEB[api.allinpro.com futures web api]
+H_API_FWEB-->M_FWEB
+
+APISIX-->H_API_FOPEN[api.allinpro.com futuresopen]
+H_API_FOPEN-->M_FOPEN
+
+APISIX-->H_API_FWS[api.allinpro.com futures ws]
+H_API_FWS-->M_FWS
+
+APISIX-->H_API_NEXS[api.allinpro.com moth-nexs-gateway]
+H_API_NEXS-->N_GW
+
+APISIX-->H_USER[user.allinpro.com]
+H_USER-->L_USER
+
+APISIX-->H_WS[ws.allinpro.com]
+H_WS-->L_SPOTWS
+
+APISIX-->H_BROKER[brokerserver.allinpro.com]
+H_BROKER-->L_BROKER_SVR
+
+APISIX-->H_MACK_API[mackerel.aie.prod api]
+H_MACK_API-->L_ANEMONE
+
+APISIX-->H_MACK_FE[mackerel.aie.prod or mackerel.allinpro.com]
+H_MACK_FE-->L_MACK_SPA
+
+APISIX-->H_INTERNAL[internal aie prod]
+H_INTERNAL-->M_ACCESSHTTP
 end
 
-%% ===== Morph namespace =====
-subgraph MORPH[Morph]
-  M_AWF_SPA[morph-awf-spa svc8080]
-  M_AWFTEST[morph-awftest-spa svc8080]
-  M_COND[morph-cond-web svc8080]
-  M_FADMIN[morph-futuresadmin-web svc8080]
-  M_FMKT[morph-futuresmarket-app svc8080]
-  M_FOPEN[morph-futuresopen-web svc8080]
-  M_FSCHED[morph-futuresschedule-app svc8080]
-  M_FWEB[morph-futuresweb-web svc8080]
-  M_FWS[morph-futuresws-app svc8080]
-  M_ACCESSHTTP[morph-narwhal-accesshttp svc8080 agent8888]
-  M_ALERT[morph-narwhal-alertcenter svc4444 agent8888]
-  M_CACHE[morph-narwhal-cachecenter svc7810 7802 7803 agent8888]
-  M_HISTR[morph-narwhal-historyreader svc7516 agent8888]
-  M_HISTW[morph-narwhal-historywriter no-svc agent8888]
-  M_MKTIDX[morph-narwhal-marketindex svc7901 agent8888]
-  M_MKTPR[morph-narwhal-marketprice svc7416 agent8888]
-  M_MATCH[morph-narwhal-matchengine svc7316 8316 agent8888]
-  M_MON[morph-narwhal-monitorcenter svc5555 agent8888]
-  M_OPLOG[morph-narwhal-operlogcompact no-svc]
-  M_SUM[morph-narwhal-tradesummary svc7519 agent8888]
-  M_SUB[morph-sub-web svc8080]
+%% ================= Landry (vertical) =================
+subgraph LANDRY[Landry namespace]
+direction TB
+L_ANEMONE[landry-anemone-web  svc8080]
+L_APA_SPA[landry-apa-spa      svc8080]
+L_AWFTEST[landry-awftest-spa  svc8080]
+L_BROKER_SVR[landry-brokerserver-web  NodePort 8080-30864]
+L_CES_ACCESS[landry-ces-accesshttp    svc8080]
+L_CES_CACHE[landry-ces-cachecenter    svc7810 7811 7812 7813 7802 7803]
+L_CES_HISTR[landry-ces-historyreader  svc7516]
+L_CES_HISTW[landry-ces-historywriter  no-svc]
+L_CES_MKTPR[landry-ces-marketprice    svc7416]
+L_CES_MATCH[landry-ces-matchengine    svc7316]
+L_CES_MON[landry-ces-monitorcenter    svc5555]
+L_CES_SUM[landry-ces-tradesummary     svc7519]
+L_CLAIRVOY[landry-clairvoy-web        NodePort 8080-30906 9000-31816]
+L_COBOCB[landry-cobocb-web            svc8080]
+L_COBOGW[landry-cobogw-web            svc8080]
+L_GATEWAY[landry-gateway-web          svc8080]
+L_MACK_SPA[landry-mackerel-spa        svc8080]
+L_SPOTAPI[landry-spotapi-web          svc8080]
+L_SPOTTASK[landry-spottask-web        svc8080]
+L_SPOTWS[landry-spotws-web            svc8080]
+L_TG_BOT[landry-tgsggd-bot            no-port]
+L_TRANS[landry-trans-web              NodePort 8080-31603 9000-31562]
+L_USER[landry-userserver-web          svc8080]
 end
 
-%% ===== Moth namespace =====
-subgraph MOTH[Moth NEXS]
-  N_GW[moth-nexs-gateway svc8080]
-  N_MKT[moth-nexs-market svc9090]
-  N_TRD[moth-nexs-trade svc9090]
-  N_UC[moth-nexs-usercenter svc9090]
+%% ================= Morph (vertical) =================
+subgraph MORPH[Morph namespace]
+direction TB
+M_AWF_SPA[morph-awf-spa                svc8080]
+M_AWFTEST[morph-awftest-spa            svc8080]
+M_COND[morph-cond-web                  svc8080]
+M_FADMIN[morph-futuresadmin-web        svc8080]
+M_FMKT[morph-futuresmarket-app         svc8080]
+M_FOPEN[morph-futuresopen-web          svc8080]
+M_FSCHED[morph-futuresschedule-app     svc8080]
+M_FWEB[morph-futuresweb-web            svc8080]
+M_FWS[morph-futuresws-app              svc8080]
+M_ACCESSHTTP[morph-narwhal-accesshttp  svc8080  agent8888]
+M_ALERT[morph-narwhal-alertcenter      svc4444  agent8888]
+M_CACHE[morph-narwhal-cachecenter      svc7810 7802 7803  agent8888]
+M_HISTR[morph-narwhal-historyreader    svc7516  agent8888]
+M_HISTW[morph-narwhal-historywriter    no-svc   agent8888]
+M_MKTIDX[morph-narwhal-marketindex     svc7901  agent8888]
+M_MKTPR[morph-narwhal-marketprice      svc7416  agent8888]
+M_MATCH[morph-narwhal-matchengine      svc7316 8316  agent8888]
+M_MON[morph-narwhal-monitorcenter      svc5555  agent8888]
+M_OPLOG[morph-narwhal-operlogcompact   no-svc]
+M_SUM[morph-narwhal-tradesummary       svc7519  agent8888]
+M_SUB[morph-sub-web                    svc8080]
 end
 
-%% ===== Data layer =====
+%% ================= Moth NEXS (vertical) =================
+subgraph MOTH[Moth NEXS namespace]
+direction TB
+N_GW[moth-nexs-gateway     svc8080]
+N_MKT[moth-nexs-market     svc9090]
+N_TRD[moth-nexs-trade      svc9090]
+N_UC[moth-nexs-usercenter  svc9090]
+end
+
+%% ================= Data Layer (vertical) =================
 subgraph DATA[Data Layer]
-  SPOTDB[spotdb.aie.prod RDS]
-  SPOTREDIS[spotredis.aie.prod Redis]
-  KAFKA[kafka.aie.prod 9092 Kafka]
-  FUTDB[futuresnewdb.aie.prod RDS]
-  FUTREDIS[futuresnewredis.aie.prod 6379 Redis]
-  KAFKANEW[kafkanew.aie.prod 9092 Kafka]
-  ETCDNEW[etcdnew.aie.prod 2379 Etcd]
+direction TB
+SPOTDB[spotdb.aie.prod    RDS]
+SPOTREDIS[spotredis.aie.prod  Redis]
+KAFKA[kafka.aie.prod 9092  Kafka]
+FUTDB[futuresnewdb.aie.prod  RDS]
+FUTREDIS[futuresnewredis.aie.prod 6379  Redis]
+KAFKANEW[kafkanew.aie.prod 9092  Kafka]
+ETCDNEW[etcdnew.aie.prod 2379  Etcd]
 end
 
-%% ===== APISIX host path routing =====
-APISIX -->|www.allinpro.com /*| M_AWF_SPA
-APISIX -->|api.allinpro.com /*| L_SPOTAPI
-APISIX -->|api.allinpro.com /futures/web/api/*| M_FWEB
-APISIX -->|api.allinpro.com /futuresopen/*| M_FOPEN
-APISIX -->|api.allinpro.com /futures/ws*| M_FWS
-APISIX -->|api.allinpro.com /moth-nexs-gateway/*| N_GW
-APISIX -->|user.allinpro.com /*| L_USER
-APISIX -->|ws.allinpro.com /ws*| L_SPOTWS
-APISIX -->|brokerserver.allinpro.com /*| L_BROKER_SVR
-APISIX -->|mackerel.aie.prod /api/*| L_ANEMONE
-APISIX -->|mackerel.aie.prod or mackerel.allinpro.com /*| L_MACK_SPA
-APISIX -->|star aie prod internal| M_ACCESSHTTP
+%% ================= Dependencies =================
+L_SPOTAPI-->SPOTDB
+L_SPOTAPI-->SPOTREDIS
+L_SPOTAPI-->KAFKA
+L_SPOTWS-->SPOTREDIS
+L_USER-.->SPOTDB
 
-%% ===== Landry deps =====
-L_SPOTAPI --> SPOTDB
-L_SPOTAPI --> SPOTREDIS
-L_SPOTAPI --> KAFKA
-L_SPOTWS --> SPOTREDIS
-L_USER -.-> SPOTDB
+M_FWEB-.->FUTDB
+M_FWEB-.->FUTREDIS
+M_FWS-.->FUTREDIS
+M_FOPEN-.->FUTDB
+M_FADMIN-.->FUTDB
+M_FSCHED-.->FUTDB
+M_ACCESSHTTP-.->ETCDNEW
+M_ACCESSHTTP-.->KAFKANEW
 
-%% ===== Morph deps =====
-M_FWEB -.-> FUTDB
-M_FWEB -.-> FUTREDIS
-M_FWS -.-> FUTREDIS
-M_FOPEN -.-> FUTDB
-M_FADMIN -.-> FUTDB
-M_FSCHED -.-> FUTDB
-M_ACCESSHTTP -.-> ETCDNEW
-M_ACCESSHTTP -.-> KAFKANEW
-
-%% ===== NEXS deps =====
-N_GW -.-> FUTDB
-N_MKT -.-> FUTDB
-N_TRD -.-> FUTDB
-N_UC -.-> FUTDB
+N_GW-.->FUTDB
+N_MKT-.->FUTDB
+N_TRD-.->FUTDB
+N_UC-.->FUTDB
 ```
 
 ---
