@@ -1,142 +1,188 @@
-# 生产环境 EC2 服务与上下游关系清单（AI Ops List.xlsx）
+# 业务数据流转拓扑图（生产环境）
 
-以下为 **逐台 EC2** 的“实例名称 / 服务角色 / 主要上游 / 主要下游”清单（仅生产环境；已排除测试/临时用途条目）。
+> 依据《脚本整理和梳理.pdf》《ALLIN 升级 morph 基础架构部署方案.pdf》《ALLIN nginx-ingress 配置详解 allinx.io》中的路由、Ingress/LB、服务清单与中间件配置整理。仅覆盖生产环境与对外入口。
 
-| 实例名称 | 服务角色 | 主要上游 | 主要下游 |
-| --- | --- | --- | --- |
-| aie1p-maker-02-copy | 做市服务 | Nacos；业务API（经 APISIX/NGINX） | Aurora makerdb；Kafka（可选） |
-| aie1p-maker-02 | 做市服务 | Nacos；业务API（经 APISIX/NGINX） | Aurora makerdb；Kafka（可选） |
-| aie1p-maker-03-copy | 做市服务 | Nacos；业务API（经 APISIX/NGINX） | Aurora makerdb；Kafka（可选） |
-| aie1p-maker-03 | 做市服务 | Nacos；业务API（经 APISIX/NGINX） | Aurora makerdb；Kafka（可选） |
-| aie1p-maker-nacos-01 | 做市 Nacos 配置中心 | 做市服务器（maker-*） | 配置数据（本机/磁盘） |
-| aie1p-morph-narwhal-r52xlarge-8c64g-v132-a-Node | 期货撮合（Narwhal）节点池（EKS） | Narwhal Access | Kafka；Aurora futuresdb；Redis |
-| aie1p-morph-narwhal-r52xlarge-8c64g-v132-a-Node | 期货撮合（Narwhal）节点池（EKS） | Narwhal Access | Kafka；Aurora futuresdb；Redis |
-| aie1p-morph-narwhal-access-c5large-2c4g-v132-a-Node | 期货接入层（Narwhal Access）节点池（EKS） | APISIX/NGINX/客户端 | Narwhal 核心；Kafka；futuresdb/Redis |
-| aie1p-morph-futuresweb-c5large-2c4g-v132-a-Node | 期货 Web 节点池（EKS） | APISIX/NGINX | Aurora futuresdb/futuresnewdb；Redis |
-| aie1p-apisix-c5large-2c4g-v132-a-Node | APISIX 网关节点池（EKS） | ALB apisix-public/internal；客户端 | EKS 后端服务；ETCD |
-| aie1p-apisix-c5large-2c4g-v132-a-Node | APISIX 网关节点池（EKS） | ALB apisix-public/internal；客户端 | EKS 后端服务；ETCD |
-| aie1p-spotapi-c5large-2c4g-v132-a-Node | 现货 Spot API 节点池（EKS） | APISIX/NGINX | Aurora spotdb；Valkey spot-redis；Kafka（按需） |
-| aie1p-devops-c5large-2c4g-v132-a-Node | DevOps/监控节点池（EKS） | 运维人员/系统 | K8S API；监控/日志系统 |
-| aie1p-brokercron-c5large-2c4g-v132-a-Node | 业务定时作业节点池（EKS） | 调度/内部触发 | 各业务库；Redis；Kafka |
-| aie1p-ces-access-c5large-2c4g-v132-a-Node | CES 接入层节点池（EKS） | APISIX/NGINX/客户端 | CES 核心；Kafka；spotdb/spot-redis |
-| aie1p-spotws-c5xlarge-4c8g-v132-a-Node | 现货 Spot WebSocket 节点池（EKS） | APISIX/NGINX | Aurora spotdb；Valkey spot-redis |
-| aie1p-ces-c52xlarge-8c16g-v132-a-Node | CES 撮合/核心节点池（EKS） | CES 接入层 | Kafka；spotdb；spot-redis |
-| aie1p-jenkins | CI 构建服务器 | 开发者；GitLab Webhook | 制品库（ECR/S3）；ArgoCD/Helm |
-| aie1p-gitlab | 代码仓库服务器 | 开发者 | Jenkins/Runner |
-| aie1p-etcd-01 | ETCD（网关/服务发现配置） | APISIX/内部系统 | —— |
-| aie1p-kafka-server-01 | Kafka 消息队列 | Narwhal/CES/业务服务（生产者） | 历史/统计/推送等（消费者） |
-| aie1p-elasticsearch-01 | 日志检索（Elasticsearch） | 应用/网关日志 | 观测/分析 |
-| aie1p-morph-kafkanew-0425 | Kafka 消息队列 | Narwhal/CES/业务服务（生产者） | 历史/统计/推送等（消费者） |
-| aie1p-etcdnew-morph-0430 | ETCD（网关/服务发现配置） | APISIX/内部系统 | —— |
-| aie1p-devops-c5large-2c4g-v132-a-Node | DevOps/监控节点池（EKS） | 运维人员/系统 | K8S API；监控/日志系统 |
-| aie1p-morph-narwhal-access-c5large-2c4g-v132-a-Node | 期货接入层（Narwhal Access）节点池（EKS） | APISIX/NGINX/客户端 | Narwhal 核心；Kafka；futuresdb/Redis |
-| aie1p-superset-server-1 | BI 报表服务器（Superset） | 分析人员 | Aurora 只读实例（spotdb 等） |
-| aie1p-morph-narwhal-access-c5large-2c4g-v132-a-Node | 期货接入层（Narwhal Access）节点池（EKS） | APISIX/NGINX/客户端 | Narwhal 核心；Kafka；futuresdb/Redis |
+---
 
-## 拓扑（Mermaid）
-
-> 说明：图中灰色节点为上下游**类别/托管资源**（非EC2），白色节点为本清单中的 EC2 实例。
+## 1. 自顶向下的流量路径（概览图）
 
 ```mermaid
-graph LR
-    ALB_APISIX["ALB apisix-public/internal"]:::cat
-    ALB_NGINX["ALB nginx-public"]:::cat
-    DEV["开发者/运维人员"]:::cat
-    ANALYST["分析人员"]:::cat
-    ARGO["ArgoCD/Helm（部署）"]:::cat
-    AURORA_SPOT["Aurora spotdb"]:::cat
-    AURORA_FUT["Aurora futuresdb/futuresnewdb"]:::cat
-    AURORA_MAKER["Aurora makerdb"]:::cat
-    VALKEY_SPOT["Valkey spot-redis"]:::cat
-    REDIS_FUT["Redis（futures域）"]:::cat
-    BACKENDS["EKS 后端服务（landry/morph）"]:::cat
-    OBS["监控/日志系统"]:::cat
-    CONSUMERS["下游消费者（历史/统计/推送等）"]:::cat
-    n1["aie1p-maker-02-copy\n做市服务"]
-    n2["aie1p-maker-02\n做市服务"]
-    n3["aie1p-maker-03-copy\n做市服务"]
-    n4["aie1p-maker-03\n做市服务"]
-    n5["aie1p-maker-nacos-01\n做市 Nacos 配置中心"]
-    n7["aie1p-morph-narwhal-r52xlarge-8c64g-v132-a-Node\n期货撮合（Narwhal）节点池（EKS）"]
-    n28["aie1p-morph-narwhal-access-c5large-2c4g-v132-a-Node\n期货接入层（Narwhal Access）节点池（EKS）"]
-    n9["aie1p-morph-futuresweb-c5large-2c4g-v132-a-Node\n期货 Web 节点池（EKS）"]
-    n11["aie1p-apisix-c5large-2c4g-v132-a-Node\nAPISIX 网关节点池（EKS）"]
-    n12["aie1p-spotapi-c5large-2c4g-v132-a-Node\n现货 Spot API 节点池（EKS）"]
-    n25["aie1p-devops-c5large-2c4g-v132-a-Node\nDevOps/监控节点池（EKS）"]
-    n14["aie1p-brokercron-c5large-2c4g-v132-a-Node\n业务定时作业节点池（EKS）"]
-    n15["aie1p-ces-access-c5large-2c4g-v132-a-Node\nCES 接入层节点池（EKS）"]
-    n16["aie1p-spotws-c5xlarge-4c8g-v132-a-Node\n现货 Spot WebSocket 节点池（EKS）"]
-    n17["aie1p-ces-c52xlarge-8c16g-v132-a-Node\nCES 撮合/核心节点池（EKS）"]
-    n18["aie1p-jenkins\nCI 构建服务器"]
-    n19["aie1p-gitlab\n代码仓库服务器"]
-    n20["aie1p-etcd-01\nETCD（网关/服务发现配置）"]
-    n21["aie1p-kafka-server-01\nKafka 消息队列"]
-    n22["aie1p-elasticsearch-01\n日志检索（Elasticsearch）"]
-    n23["aie1p-morph-kafkanew-0425\nKafka 消息队列"]
-    n24["aie1p-etcdnew-morph-0430\nETCD（网关/服务发现配置）"]
-    n27["aie1p-superset-server-1\nBI 报表服务器（Superset）"]
-    ALB_APISIX --> n1
-    ALB_NGINX --> n1
-    n5 --> n1
-    n1 --> AURORA_MAKER
-    n1 --> n21
-    ALB_APISIX --> n2
-    ALB_NGINX --> n2
-    n5 --> n2
-    n2 --> AURORA_MAKER
-    n2 --> n21
-    ALB_APISIX --> n3
-    ALB_NGINX --> n3
-    n5 --> n3
-    n3 --> AURORA_MAKER
-    n3 --> n21
-    ALB_APISIX --> n4
-    ALB_NGINX --> n4
-    n5 --> n4
-    n4 --> AURORA_MAKER
-    n4 --> n21
-    n7 --> AURORA_FUT
-    n7 --> REDIS_FUT
-    n7 --> n23
-    ALB_APISIX --> n28
-    ALB_NGINX --> n28
-    n28 --> REDIS_FUT
-    n28 --> n23
-    ALB_APISIX --> n9
-    ALB_NGINX --> n9
-    n9 --> AURORA_FUT
-    n9 --> REDIS_FUT
-    n11 --> n20
-    n11 --> n24
-    ALB_APISIX --> n12
-    ALB_NGINX --> n12
-    n12 --> AURORA_SPOT
-    n12 --> VALKEY_SPOT
-    n12 --> n21
-    DEV --> n25
-    n25 --> OBS
-    n14 --> REDIS_FUT
-    n14 --> n21
-    ALB_APISIX --> n15
-    ALB_NGINX --> n15
-    n15 --> n21
-    ALB_APISIX --> n16
-    ALB_NGINX --> n16
-    n16 --> AURORA_SPOT
-    n16 --> VALKEY_SPOT
-    n17 --> n21
-    DEV --> n18
-    n19 --> n18
-    n18 --> ARGO
-    DEV --> n19
-    n19 --> n18
-    ALB_APISIX --> n20
-    n22 --> OBS
-    ALB_APISIX --> n24
-    ANALYST --> n27
-    DEV --> n19
-    DEV --> n18
-    ALB_APISIX --> BACKENDS
-    ALB_NGINX --> BACKENDS
-classDef cat fill:#eee,stroke:#999,stroke-width:1px;
+flowchart LR
+    subgraph Internet[Internet]
+      U[终端用户/客户端]
+    end
+
+    U -->|FQDN| DNS[DNS: Route53/外部DNS]
+
+    subgraph Edge[CDN/边缘]
+      CF[CloudFront: TLS 终止]
+    end
+
+    DNS --> CF
+
+    subgraph Entry[入口负载均衡]
+      ALB_PUB[ALB: aie1p-apisix-public\nHosts: www.allinpro.com, *.allinpro.com, *.allinx.io]
+      ALB_INT[ALB: aie1p-apisix-internal\nHosts: *.aie.prod]
+    end
+
+    CF --> ALB_PUB
+    DNS --> ALB_INT
+
+    ALB_PUB --> APISIX[APISIX Gateway (EKS)]
+    ALB_INT --> APISIX
+
+    %% --- 路由到业务域 ---
+    subgraph Spot[现货域(Landry命名空间)]
+      SPOTAPI[landry-spotapi-web]
+      SPOTWS[landry-spotws-web]
+      USERSVR[landry-userserver-web]
+      BROKER[landry-brokerserver-web]
+      MACK_SPA[landry-mackerel-spa]
+      ANEMONE[landry-anemone-web]
+      GATEWAY[landry-gateway-web]
+    end
+
+    subgraph Futures[合约域(Morph命名空间)]
+      AWF_SPA[morph-awf-spa]
+      FUT_WEB[morph-futuresweb-web]
+      FUT_OPEN[morph-futuresopen-web]
+      FUT_WS[morph-futuresws-app]
+      FUT_ADMIN[morph-futuresadmin-web]
+      FUT_MARKET[morph-futuresmarket-app]
+      NARW_ACC[morph-narwhal-accesshttp]
+    end
+
+    subgraph Nexs[NEXS (Moth命名空间)]
+      NEXS_GW[moth-nexs-gateway]
+      NEXS_MKT[moth-nexs-market]
+      NEXS_TRD[moth-nexs-trade]
+      NEXS_UC[moth-nexs-usercenter]
+    end
+
+    %% --- 中间件 ---
+    subgraph Middleware[中间件/数据层]
+      subgraph LandryMW[现货中间件]
+        SPOTDB[(spotdb.aie.prod / RDS)]
+        SPOTREDIS[(spotredis.aie.prod / Redis)]
+        KAFKA[(kafka.aie.prod:9092)]
+      end
+      subgraph MorphMW[合约中间件]
+        FUTDB[(futuresnewdb.aie.prod / RDS)]
+        FUTREDIS[(futuresnewredis.aie.prod / Redis)]
+        KAFKANEW[(kafkanew.aie.prod:9092)]
+        ETCDNEW[(etcdnew.aie.prod:2379)]
+      end
+    end
+
+    %% --- APISIX 路由示意 ---
+    APISIX -->|www.allinpro.com /*| AWF_SPA
+    APISIX -->|api.allinpro.com /*| SPOTAPI
+    APISIX -->|api.allinpro.com /futures/web/api/*| FUT_WEB
+    APISIX -->|api.allinpro.com /futuresopen/*| FUT_OPEN
+    APISIX -->|api.allinpro.com /futures/ws*| FUT_WS
+    APISIX -->|api.allinpro.com /moth-nexs-gateway/*| NEXS_GW
+    APISIX -->|user.allinpro.com /*| USERSVR
+    APISIX -->|ws.allinpro.com /ws*| SPOTWS
+    APISIX -->|brokerserver.allinpro.com /*| BROKER
+    APISIX -->|mackerel.aie.prod /api/*| ANEMONE
+    APISIX -->|mackerel.(allinpro.com|aie.prod) /*| MACK_SPA
+    APISIX -->|*.aie.prod 内部域| NARW_ACC
+
+    %% --- 业务到数据依赖 ---
+    %% 现货
+    SPOTAPI --> SPOTDB
+    SPOTAPI --> SPOTREDIS
+    SPOTAPI --> KAFKA
+    SPOTWS --> SPOTREDIS
+    USERSVR --> SPOTDB
+
+    %% 合约
+    AWF_SPA --> FUT_WEB
+    FUT_WEB --> FUTDB
+    FUT_WEB --> FUTREDIS
+    FUT_OPEN --> FUTDB
+    FUT_WS --> FUTREDIS
+    FUT_ADMIN --> FUTDB
+    FUT_ADMIN --> FUTREDIS
+    NARW_ACC --> ETCDNEW
+    NARW_ACC --> KAFKANEW
+
+    %% NEXS
+    NEXS_GW --> FUTDB
+    NEXS_MKT --> FUTDB
+    NEXS_TRD --> FUTDB
+    NEXS_UC --> FUTDB
 ```
+
+---
+
+## 2. 生产对外域名 → 上游服务映射（节选）
+
+| 域名 (Host)                                   | 路径 (Path)             | 上游服务 (Namespace/Service)              |
+| ------------------------------------------- | --------------------- | ------------------------------------- |
+| [www.allinpro.com](http://www.allinpro.com) | /\*                   | morph/morph-awf-spa:8080              |
+| api.allinpro.com                            | /\*                   | landry/landry-spotapi-web:8080        |
+| api.allinpro.com                            | /futures/web/api/\*   | morph/morph-futuresweb-web:8080       |
+| api.allinpro.com                            | /futuresopen/\*       | morph/morph-futuresopen-web:8080      |
+| api.allinpro.com                            | /futures/ws\*         | morph/morph-futuresws-app:8080        |
+| api.allinpro.com                            | /moth-nexs-gateway/\* | moth/moth-nexs-gateway:8080           |
+| user.allinpro.com                           | /\*                   | landry/landry-userserver-web:8080     |
+| ws.allinpro.com                             | /ws\*                 | landry/landry-spotws-web:8080         |
+| brokerserver.allinpro.com                   | /\*                   | landry/landry-brokerserver-web:8080   |
+| mackerel.aie.prod                           | /api/\*               | landry/landry-anemone-web:8080        |
+| mackerel.aie.prod / mackerel.allinpro.com   | /\*                   | landry/landry-mackerel-spa:8080       |
+| \*.aie.prod（内部）                             | /\*                   | morph/morph-narwhal-accesshttp:8080 等 |
+
+> 注：上表只列出与用户路径相关的核心条目，完整清单见文档原始路由导出。
+
+---
+
+## 3. 服务清单（生产）
+
+### 3.1 Landry（现货域）
+
+* landry-spotapi-web、landry-spotws-web、landry-userserver-web、landry-brokerserver-web
+* landry-gateway-web、landry-mackerel-spa、landry-anemone-web
+* CES/撮合与工具：landry-ces-*, landry-trans-web, landry-cobo* 等
+
+### 3.2 Morph（合约域）
+
+* Web/API：morph-awf-spa、morph-futuresweb-web、morph-futuresopen-web、morph-futuresws-app、morph-futuresadmin-web、morph-futuresmarket-app
+* Narwhal（撮合/组件）：morph-narwhal-accesshttp 等
+* Ingress：ingress-nginx-controller（ClusterIP，ALB 直连 POD IP）
+
+### 3.3 Moth（NEXS）
+
+* moth-nexs-gateway、moth-nexs-market、moth-nexs-trade、moth-nexs-usercenter
+
+---
+
+## 4. 中间件与数据源（生产）
+
+* 现货（Landry）
+
+  * RDS：spotdb.aie.prod
+  * Redis：spotredis.aie.prod
+  * Kafka：kafka.aie.prod:9092
+
+* 合约（Morph）
+
+  * RDS：futuresnewdb.aie.prod
+  * Redis：futuresnewredis.aie.prod
+  * Kafka：kafkanew\.aie.prod:9092（EC2 自建）
+  * Etcd：etcdnew\.aie.prod
+
+---
+
+## 5. 入口与负载均衡
+
+* 外部域名（allinpro.com / allinx.io）→ CloudFront（HTTPS 终止）→ ALB（HTTP）→ APISIX（HTTP）→ EKS 服务（ClusterIP）
+* 内部域名（\*.aie.prod）→ 内部 ALB → APISIX → EKS 服务
+* NGINX Ingress（morph）为 ClusterIP，ALB 使用 target-type: ip 直连 POD
+
+---
+
+## 6. 备注
+
+* 本图用于“业务数据流转”视角，平台运维入口（apisix-admin、argocd 等）未展开。
+* 若需导出 PNG/SVG 或按子域拆分子图，可在本页继续迭代。
