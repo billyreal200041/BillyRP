@@ -3,7 +3,8 @@ pipeline {
   options {
     timestamps()
     timeout(time: 40, unit: 'MINUTES')
-    disableConcurrentBuilds()   // 不并发
+    disableConcurrentBuilds()            // 不并发
+    skipDefaultCheckout(false)
   }
 
   environment {
@@ -16,7 +17,6 @@ pipeline {
     BUILD_TAG = "${SHORT_SHA}-${env.BUILD_NUMBER}"
     DOCKER_BUILDKIT = '1'
     TARGET_BRANCH = 'main'
-    SKIP_BUILD = 'false'
   }
 
   triggers { githubPush() }
@@ -24,18 +24,15 @@ pipeline {
   stages {
     stage('Checkout') { steps { checkout scm } }
 
-    // 护栏：自回写或仅改 k8s/ 的提交 → 跳过
-    stage('Guard') {
+    // === 强护栏：命中就立刻终止整条流水线（不再执行任何 stage） ===
+    stage('Guard (hard stop)') {
       steps {
         script {
-          def author = sh(returnStdout: true, script: "git log -1 --pretty=%ae").trim()
-          def msg    = sh(returnStdout: true, script: "git log -1 --pretty=%s").trim()
-          def msgLC  = msg.toLowerCase()
-
-          // 本次提交涉及的文件
-          def changedRaw = sh(returnStdout: true, script: "git show --pretty='' --name-only HEAD").trim()
-          def changed = changedRaw ? changedRaw.split('\\n').collect{ it.trim() }.findAll{ it } : []
-          def k8sOnly = (changed && changed.every { it.startsWith('k8s/') })
+          def author    = sh(returnStdout: true, script: "git log -1 --pretty=%ae").trim()
+          def msg       = sh(returnStdout: true, script: "git log -1 --pretty=%s").trim()
+          def msgLC     = msg.toLowerCase()
+          def changed   = sh(returnStdout: true, script: "git show --pretty= --name-only HEAD").trim().split('\\n').collect{ it.trim() }.findAll{ it }
+          def k8sOnly   = (changed && changed.every { it.startsWith('k8s/') })
 
           echo "Last commit author: ${author}"
           echo "Last commit msg   : ${msg}"
@@ -44,16 +41,18 @@ pipeline {
 
           def isBotAuthor = (author == 'jenkins-bot@local')
           def isSkipMsg   = (msgLC.contains('[skip ci]') || msgLC.contains('[ci skip]') || msgLC.contains('chore(ci): bump images'))
+
           if (isBotAuthor || isSkipMsg || k8sOnly) {
-            env.SKIP_BUILD = 'true'
-            echo "Guard HIT → mark SKIP_BUILD=true (self-commit or k8s-only or [skip ci])."
+            echo "Guard HIT → abort pipeline (self-commit / [skip ci] / k8s-only)."
+            currentBuild.displayName = "#${env.BUILD_NUMBER} [SKIPPED]"
+            // 关键：抛出 AbortException 结束整条流水线（灰色 ABORTED，不是失败）
+            throw new hudson.AbortException('Skipped by guard')
           }
         }
       }
     }
 
     stage('Login ECR') {
-      when { expression { env.SKIP_BUILD != 'true' } }
       steps {
         withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-access-key']]) {
           sh '''
@@ -72,7 +71,6 @@ pipeline {
     }
 
     stage('Build & Push Images') {
-      when { expression { env.SKIP_BUILD != 'true' } }
       steps {
         sh '''
           set -e
@@ -90,7 +88,6 @@ pipeline {
     }
 
     stage('Bump manifests & Push back to Git') {
-      when { expression { env.SKIP_BUILD != 'true' } }
       steps {
         withCredentials([string(credentialsId: 'github-token', variable: 'GHTOKEN')]) {
           sh '''
@@ -123,15 +120,8 @@ pipeline {
   }
 
   post {
-    success {
-      script {
-        if (env.SKIP_BUILD == 'true') {
-          echo "Skipped (self-commit / k8s-only / [skip ci])."
-        } else {
-          echo "Build ${BUILD_TAG} done. Argo CD will auto-sync shortly."
-        }
-      }
-    }
+    success { echo "Done." }
+    aborted { echo "Aborted by Guard (expected for k8s-only / [skip ci] commits)." }
     failure { echo "Build failed. Please check logs." }
   }
 }
