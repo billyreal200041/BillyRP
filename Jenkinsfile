@@ -3,7 +3,7 @@ pipeline {
   options {
     timestamps()
     timeout(time: 40, unit: 'MINUTES')
-    disableConcurrentBuilds()   // 避免并发与堆积
+    disableConcurrentBuilds()   // 不并发
   }
 
   environment {
@@ -16,7 +16,7 @@ pipeline {
     BUILD_TAG = "${SHORT_SHA}-${env.BUILD_NUMBER}"
     DOCKER_BUILDKIT = '1'
     TARGET_BRANCH = 'main'
-    SKIP_BUILD = 'false'   // 动态计算
+    SKIP_BUILD = 'false'
   }
 
   triggers { githubPush() }
@@ -24,29 +24,29 @@ pipeline {
   stages {
     stage('Checkout') { steps { checkout scm } }
 
-    // ==== 护栏：自触发/仅改 k8s 清单 的构建一律跳过 ====
-    stage('Guard: skip self-triggered or k8s-only commits') {
+    // 护栏：自回写或仅改 k8s/ 的提交 → 跳过
+    stage('Guard') {
       steps {
         script {
           def author = sh(returnStdout: true, script: "git log -1 --pretty=%ae").trim()
           def msg    = sh(returnStdout: true, script: "git log -1 --pretty=%s").trim()
+          def msgLC  = msg.toLowerCase()
+
+          // 本次提交涉及的文件
+          def changedRaw = sh(returnStdout: true, script: "git show --pretty='' --name-only HEAD").trim()
+          def changed = changedRaw ? changedRaw.split('\\n').collect{ it.trim() }.findAll{ it } : []
+          def k8sOnly = (changed && changed.every { it.startsWith('k8s/') })
+
           echo "Last commit author: ${author}"
           echo "Last commit msg   : ${msg}"
+          echo "Changed files     : ${changed}"
+          echo "k8s-only commit?  : ${k8sOnly}"
 
-          // 规则 1：机器人回写或显式 [skip ci]
-          def isBotCommit = (author == "jenkins-bot@local" || msg =~ /(?i)\\[skip ci]|\\[ci skip]|bump images/)
-
-          // 规则 2：改动文件仅在 k8s/ 目录（典型自回写）
-          def changed = sh(returnStdout: true, script: "git show --pretty='' --name-only HEAD").trim().split('\\n') as List
-          def nonK8s = changed.findAll { !(it ==~ /^k8s\\//) && it.trim() }
-          def k8sOnly = (changed && nonK8s.isEmpty())
-
-          echo "Changed files: ${changed}"
-          echo "k8s-only commit? ${k8sOnly}"
-
-          if (isBotCommit || k8sOnly) {
+          def isBotAuthor = (author == 'jenkins-bot@local')
+          def isSkipMsg   = (msgLC.contains('[skip ci]') || msgLC.contains('[ci skip]') || msgLC.contains('chore(ci): bump images'))
+          if (isBotAuthor || isSkipMsg || k8sOnly) {
             env.SKIP_BUILD = 'true'
-            echo "Guard hit → skip this run."
+            echo "Guard HIT → mark SKIP_BUILD=true (self-commit or k8s-only or [skip ci])."
           }
         }
       }
@@ -101,7 +101,6 @@ pipeline {
             update_image() {
               local file="$1" repo="$2" tag="$3"
               echo "Updating $file -> ${repo}:${tag}"
-              # 采用 sed 简单可靠替换（image: 独占一行）
               sed -i -E "s|^(\\s*image:\\s*).*$|\\1${repo}:${tag}|" "$file"
             }
 
@@ -127,7 +126,7 @@ pipeline {
     success {
       script {
         if (env.SKIP_BUILD == 'true') {
-          echo "Skipped self-triggered/k8s-only build."
+          echo "Skipped (self-commit / k8s-only / [skip ci])."
         } else {
           echo "Build ${BUILD_TAG} done. Argo CD will auto-sync shortly."
         }
