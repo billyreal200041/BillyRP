@@ -1,14 +1,14 @@
 pipeline {
   agent any
 
-  // 防并发 + 超时
+  // 防并发 + 超时 + 时间戳
   options {
     disableConcurrentBuilds()            // 禁止同一 Job 并发
     timeout(time: 40, unit: 'MINUTES')   // 整体超时
     timestamps()
   }
 
-  // 仅由 GitHub Webhook 触发
+  // 仅由 GitHub Webhook 触发（不要再配 Poll SCM）
   triggers { githubPush() }
 
   environment {
@@ -29,30 +29,26 @@ pipeline {
       }
     }
 
-    // 里程碑：如果有更新的构建排到这里，老的在此处自动结束
-    stage('Milestone #1') {
-      steps {
-        milestone(1)
-      }
-    }
+    // 里程碑：有更新的构建排队到这儿时，旧构建自动终止
+    stage('Milestone #1') { steps { milestone(1) } }
 
     stage('Sanity: whoami & docker') {
       steps {
         sh '''
           set -e
           echo "USER=$(whoami)"; id
-          docker version >/dev/null 2>&1 || { echo "Docker not available for $(whoami)"; exit 1; }
+          docker version >/dev/null 2>&1 || { echo "[ERROR] Docker not available for $(whoami)"; exit 1; }
         '''
       }
     }
 
-    stage('Login ECR (AK/SK)') {
+    stage('Login ECR (AK/SK via Jenkins Credentials)') {
       steps {
-        // 使用 Jenkins 中 ID=aws-access-key 的 AWS 凭据 + 固定 region
+        // 使用 Jenkins 全局凭据：ID=aws-access-key（类型：AWS Credentials）
         withAWS(credentials: 'aws-access-key', region: "${env.AWS_REGION}") {
           sh '''
             set -e
-            echo "AWS ID: $(aws sts get-caller-identity --query Account --output text)"
+            echo "[INFO] AWS ID: $(aws sts get-caller-identity --query Account --output text)"
             aws ecr get-login-password --region "$AWS_REGION" \
             | docker login --username AWS --password-stdin \
               ${AWS_ACCOUNTID}.dkr.ecr.${AWS_REGION}.amazonaws.com
@@ -61,16 +57,11 @@ pipeline {
       }
     }
 
-    // 里程碑：构建前再次去重；更“新的”提交来了会让老构建止步于此
-    stage('Milestone #2') {
-      steps {
-        milestone(2)
-      }
-    }
+    // 再次去重，防止旧构建继续往下覆盖新提交
+    stage('Milestone #2') { steps { milestone(2) } }
 
     stage('Build & Push Images') {
       steps {
-        // 构建与推送不需要再次调用 AWS CLI，因此不强制包 withAWS
         sh '''
           set -e
           echo "[Build] Tag=${BUILD_TAG}"
@@ -86,22 +77,19 @@ pipeline {
       }
     }
 
-    // 里程碑：防止较旧构建在发布阶段覆盖较新的提交
-    stage('Milestone #3') {
-      steps {
-        milestone(3)
-      }
-    }
+    // 发布前最后的去重
+    stage('Milestone #3') { steps { milestone(3) } }
 
-    stage('Bump manifests & Push back to Git') {
+    stage('Bump manifests & Push back to Git (main)') {
       steps {
+        // GitHub Token（Secret text），ID=github-token（至少 repo 权限）
         withCredentials([string(credentialsId: 'github-token', variable: 'GHTOKEN')]) {
           sh '''
             set -e
             git config user.name  "jenkins-bot"
             git config user.email "jenkins-bot@local"
 
-            # 优先 yq；失败则用 sed 回退
+            # 优先 yq；失败则回退 sed
             if ! command -v yq >/dev/null 2>&1; then
               (sudo apt-get update -y && sudo apt-get install -y yq) || true
             fi
@@ -111,6 +99,7 @@ pipeline {
               if command -v yq >/dev/null 2>&1; then
                 yq -i ".spec.template.spec.containers[0].image = \\"${repo}:${tag}\\"" "$file"
               else
+                # sed 回退：要求 image: 独占一行
                 sed -i -E "s|^(\\s*image:\\s*).*$|\\1${repo}:${tag}|" "$file"
               fi
             }
@@ -120,14 +109,14 @@ pipeline {
             update_image k8s/c/deployment.yaml ${ECR_C} ${BUILD_TAG}
 
             git add k8s/*/deployment.yaml
-            git commit -m "chore(ci): bump images to ${BUILD_TAG}" || echo "No changes to commit."
+            git commit -m "chore(ci): bump images to ${BUILD_TAG}" || echo "[INFO] No changes to commit."
 
+            # 统一用 https + token 推送；显式推送到 main（避免 HEAD:HEAD 问题）
             REPO_URL=$(git config --get remote.origin.url)
             echo "$REPO_URL" | grep -q '^http' || REPO_URL=$(echo "$REPO_URL" | sed 's#git@github.com:#https://github.com/#; s#\\.git$##').git
             REPO_URL_AUTH=$(echo "$REPO_URL" | sed "s#https://#https://${GHTOKEN}@#")
 
-            # 推回同一分支
-            git push "$REPO_URL_AUTH" HEAD:$(git rev-parse --abbrev-ref HEAD)
+            git push "$REPO_URL_AUTH" HEAD:refs/heads/main
           '''
         }
       }
