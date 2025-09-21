@@ -2,7 +2,7 @@ pipeline {
   agent any
 
   options {
-    disableConcurrentBuilds()            // 禁并发
+    disableConcurrentBuilds()
     timeout(time: 40, unit: 'MINUTES')
     timestamps()
   }
@@ -27,13 +27,20 @@ pipeline {
   }
 
   stages {
+
     stage('Checkout') {
-      steps { checkout scm }
+      steps {
+        checkout scm
+      }
     }
 
-    stage('Milestone #1') { steps { milestone(1) } }
+    stage('Milestone #1') {
+      steps {
+        milestone(1)
+      }
+    }
 
-    // 自触发保护（沙箱友好：不抛异常，只打标记，后续阶段用 when 跳过）
+    // 自触发保护（不抛异常，只打标记；后续阶段用 when 跳过）
     stage('Self-push Guard') {
       steps {
         script {
@@ -50,7 +57,10 @@ pipeline {
     }
 
     stage('Sanity: whoami & docker') {
-      when { expression { env.SKIP_REST != 'true' } }
+      when {
+        beforeAgent true
+        expression { env.SKIP_REST != 'true' }
+      }
       steps {
         sh '''
           set -e
@@ -61,7 +71,10 @@ pipeline {
     }
 
     stage('Login ECR (AK/SK via Jenkins Credentials)') {
-      when { expression { env.SKIP_REST != 'true' } }
+      when {
+        beforeAgent true
+        expression { env.SKIP_REST != 'true' }
+      }
       steps {
         withAWS(credentials: 'aws-access-key', region: "${env.AWS_REGION}") {
           sh '''
@@ -75,10 +88,21 @@ pipeline {
       }
     }
 
-    stage('Milestone #2') { when { expression { env.SKIP_REST != 'true' } } steps { milestone(2) } }
+    stage('Milestone #2') {
+      when {
+        beforeAgent true
+        expression { env.SKIP_REST != 'true' }
+      }
+      steps {
+        milestone(2)
+      }
+    }
 
     stage('Build & Push Images') {
-      when { expression { env.SKIP_REST != 'true' } }
+      when {
+        beforeAgent true
+        expression { env.SKIP_REST != 'true' }
+      }
       steps {
         sh '''
           set -e
@@ -95,10 +119,21 @@ pipeline {
       }
     }
 
-    stage('Milestone #3') { when { expression { env.SKIP_REST != 'true' } } steps { milestone(3) } }
+    stage('Milestone #3') {
+      when {
+        beforeAgent true
+        expression { env.SKIP_REST != 'true' }
+      }
+      steps {
+        milestone(3)
+      }
+    }
 
     stage('Bump manifests & Push back to Git (main)') {
-      when { expression { env.SKIP_REST != 'true' } }
+      when {
+        beforeAgent true
+        expression { env.SKIP_REST != 'true' }
+      }
       steps {
         withCredentials([string(credentialsId: 'github-token', variable: 'GHTOKEN')]) {
           sh '''
@@ -106,7 +141,7 @@ pipeline {
             git config user.name  "jenkins-bot"
             git config user.email "jenkins-bot@local"
 
-            # 优先 yq；失败则用 sed（无 sudo 权限时会自动回退）
+            # 优先 yq；失败则回退 sed（无 sudo 权限会自动跳过）
             if ! command -v yq >/dev/null 2>&1; then
               (sudo apt-get update -y && sudo apt-get install -y yq) || true
             fi
@@ -127,7 +162,7 @@ pipeline {
 
             git add k8s/*/deployment.yaml
 
-            # 无改动就不提交、不推送，避免空推触发
+            # 没有变更就不提交、不推送，避免空推再次触发
             if git diff --cached --quiet; then
               echo "[INFO] No manifest changes. Skip push."
               exit 0
@@ -135,7 +170,7 @@ pipeline {
 
             git commit -m "chore(ci): bump images to ${BUILD_TAG}"
 
-            # 用 https+token 推送；显式推到 main（避免 HEAD:HEAD 问题）
+            # 显式推 main，避免 HEAD:HEAD 问题
             REPO_URL=$(git config --get remote.origin.url)
             echo "$REPO_URL" | grep -q '^http' || REPO_URL=$(echo "$REPO_URL" | sed 's#git@github.com:#https://github.com/#; s#\\.git$##').git
             REPO_URL_AUTH=$(echo "$REPO_URL" | sed "s#https://#https://${GHTOKEN}@#")
