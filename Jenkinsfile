@@ -11,6 +11,7 @@ pipeline {
     SHORT_SHA = "${env.GIT_COMMIT?.take(7) ?: 'local'}"
     BUILD_TAG = "${SHORT_SHA}-${env.BUILD_NUMBER}"
     DOCKER_BUILDKIT = '1'
+    TARGET_BRANCH = 'main'   // <== 明确目标分支
   }
 
   triggers { githubPush() }
@@ -20,6 +21,7 @@ pipeline {
 
     stage('Login ECR') {
       steps {
+        // 你当前使用的是 withCredentials 注入 AK/SK 的版本（日志已证明可用）
         withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-access-key']]) {
           sh '''
             set -e
@@ -40,9 +42,12 @@ pipeline {
       steps {
         sh '''
           set -e
+          echo "===> Build images"
           docker build -t ${ECR_A}:latest -t ${ECR_A}:${BUILD_TAG} a
           docker build -t ${ECR_B}:latest -t ${ECR_B}:${BUILD_TAG} b
           docker build -t ${ECR_C}:latest -t ${ECR_C}:${BUILD_TAG} c
+
+          echo "===> Push images to ECR"
           docker push ${ECR_A}:latest && docker push ${ECR_A}:${BUILD_TAG}
           docker push ${ECR_B}:latest && docker push ${ECR_B}:${BUILD_TAG}
           docker push ${ECR_C}:latest && docker push ${ECR_C}:${BUILD_TAG}
@@ -58,12 +63,14 @@ pipeline {
             git config user.name  "jenkins-bot"
             git config user.email "jenkins-bot@local"
 
+            # 优先 yq；失败则 sed 回退（要求 image: 独占一行）
             if ! command -v yq >/dev/null 2>&1; then
               (sudo apt-get update -y && sudo apt-get install -y yq) || true
             fi
 
             update_image() {
               local file="$1" repo="$2" tag="$3"
+              echo "Updating $file -> ${repo}:${tag}"
               if command -v yq >/dev/null 2>&1; then
                 yq -i ".spec.template.spec.containers[0].image = \\"${repo}:${tag}\\"" "$file"
               else
@@ -81,7 +88,9 @@ pipeline {
             REPO_URL=$(git config --get remote.origin.url)
             echo "$REPO_URL" | grep -q '^http' || REPO_URL=$(echo "$REPO_URL" | sed 's#git@github.com:#https://github.com/#; s#\\.git$##').git
             REPO_URL_AUTH=$(echo "$REPO_URL" | sed "s#https://#https://${GHTOKEN}@#")
-            git push "$REPO_URL_AUTH" HEAD:$(git rev-parse --abbrev-ref HEAD)
+
+            # 关键修复：明确推到远端 main 分支，避免 detached HEAD 推不动
+            git push "$REPO_URL_AUTH" HEAD:refs/heads/${TARGET_BRANCH}
           '''
         }
       }
