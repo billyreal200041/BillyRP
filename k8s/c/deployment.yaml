@@ -1,1 +1,23 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo-web-c
+  namespace: morph
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: demo-web-c } }
+  template:
+    metadata:
+      labels:
+        app: demo-web-c
+    spec:
+      containers:
+        - name: web
+          image: 692859925329.dkr.ecr.ap-southeast-5.amazonaws.com/demo-web-c:PLACEHOLDER # Jenkins 会回写
+          ports: [{containerPort: 80}]
+          imagePullPolicy: Always
+          readinessProbe:
+            httpGet: { path: /, port: 80 }
+            initialDelaySeconds: 1
+            periodSeconds: 5
 
