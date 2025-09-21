@@ -20,16 +20,18 @@ pipeline {
 
     stage('Login ECR') {
       steps {
-        script {
-          // 如果你使用 AK/SK 而不是实例角色：去掉下行注释并确保 credentialsId 对应
-          // withAWS(credentials: 'aws-access-key', region: "${env.AWS_REGION}") {
-            sh '''
-              set -e
-              aws ecr get-login-password --region "$AWS_REGION" \
-              | docker login --username AWS --password-stdin \
-                ${AWS_ACCOUNTID}.dkr.ecr.${AWS_REGION}.amazonaws.com
-            '''
-          // }
+        withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-access-key']]) {
+          sh '''
+            set -e
+            echo "===> AWS identity"
+            aws configure list
+            aws sts get-caller-identity
+
+            echo "===> Docker login to ECR"
+            aws ecr get-login-password --region "$AWS_REGION" \
+            | docker login --username AWS --password-stdin \
+              ${AWS_ACCOUNTID}.dkr.ecr.${AWS_REGION}.amazonaws.com
+          '''
         }
       }
     }
@@ -56,7 +58,6 @@ pipeline {
             git config user.name  "jenkins-bot"
             git config user.email "jenkins-bot@local"
 
-            # 优先 yq；失败则用 sed
             if ! command -v yq >/dev/null 2>&1; then
               (sudo apt-get update -y && sudo apt-get install -y yq) || true
             fi
