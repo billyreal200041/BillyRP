@@ -1,11 +1,6 @@
 pipeline {
   agent any
-  options {
-    timestamps()
-    timeout(time: 40, unit: 'MINUTES')
-    disableConcurrentBuilds()
-    skipDefaultCheckout(false)
-  }
+  options { timestamps(); timeout(time: 40, unit: 'MINUTES') }
 
   environment {
     AWS_REGION    = 'ap-southeast-5'
@@ -16,60 +11,35 @@ pipeline {
     SHORT_SHA = "${env.GIT_COMMIT?.take(7) ?: 'local'}"
     BUILD_TAG = "${SHORT_SHA}-${env.BUILD_NUMBER}"
     DOCKER_BUILDKIT = '1'
-    TARGET_BRANCH = 'main'
-    SKIP_BUILD = 'false'
   }
 
+  // 由 GitHub Webhook 触发
   triggers { githubPush() }
 
   stages {
-    stage('Checkout') { steps { checkout scm } }
-
-    stage('Guard (soft stop, no error)') {
+    stage('Checkout') {
       steps {
-        script {
-          def author  = sh(returnStdout: true, script: "git log -1 --pretty=%ae").trim()
-          def msg     = sh(returnStdout: true, script: "git log -1 --pretty=%s").trim().toLowerCase()
-          def changed = sh(returnStdout: true, script: "git show --pretty= --name-only HEAD").trim()
-                           .split('\\n').collect{ it.trim() }.findAll{ it }
-          def k8sOnly = (changed && changed.every { it.startsWith('k8s/') })
-
-          echo "Last commit author: ${author}"
-          echo "Last commit msg   : ${msg}"
-          echo "Changed files     : ${changed}"
-          echo "k8s-only commit?  : ${k8sOnly}"
-
-          def isBotAuthor = (author == 'jenkins-bot@local')
-          def isSkipMsg   = (msg.contains('[skip ci]') || msg.contains('[ci skip]') || msg.contains('chore(ci): bump images'))
-
-          if (isBotAuthor || isSkipMsg || k8sOnly) {
-            echo "Guard HIT → mark build ABORTED & skip remaining stages."
-            currentBuild.displayName = "#${env.BUILD_NUMBER} [SKIPPED]"
-            currentBuild.result = 'ABORTED'
-            env.SKIP_BUILD = 'true'
-            return   // 软退出本 stage，不抛异常
-          }
-        }
+        checkout scm
       }
     }
 
     stage('Login ECR') {
-      when { expression { env.SKIP_BUILD != 'true' } }
       steps {
-        withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-access-key']]) {
-          sh '''
-            set -e
-            aws sts get-caller-identity
-            aws ecr get-login-password --region "$AWS_REGION" \
-            | docker login --username AWS --password-stdin \
-              ${AWS_ACCOUNTID}.dkr.ecr.${AWS_REGION}.amazonaws.com
-          '''
+        script {
+          // 如果你使用 AK/SK 而不是实例角色：去掉下行注释并确保 credentialsId 对应
+          // withAWS(credentials: 'aws-access-key', region: "${env.AWS_REGION}") {
+            sh '''
+              set -e
+              aws ecr get-login-password --region "$AWS_REGION" \
+              | docker login --username AWS --password-stdin \
+                ${AWS_ACCOUNTID}.dkr.ecr.${AWS_REGION}.amazonaws.com
+            '''
+          // }
         }
       }
     }
 
     stage('Build & Push Images') {
-      when { expression { env.SKIP_BUILD != 'true' } }
       steps {
         sh '''
           set -e
@@ -84,7 +54,6 @@ pipeline {
     }
 
     stage('Bump manifests & Push back to Git') {
-      when { expression { env.SKIP_BUILD != 'true' } }
       steps {
         withCredentials([string(credentialsId: 'github-token', variable: 'GHTOKEN')]) {
           sh '''
@@ -92,9 +61,18 @@ pipeline {
             git config user.name  "jenkins-bot"
             git config user.email "jenkins-bot@local"
 
+            # 优先 yq；失败则用 sed
+            if ! command -v yq >/dev/null 2>&1; then
+              (sudo apt-get update -y && sudo apt-get install -y yq) || true
+            fi
+
             update_image() {
               local file="$1" repo="$2" tag="$3"
-              sed -i -E "s|^(\\s*image:\\s*).*$|\\1${repo}:${tag}|" "$file"
+              if command -v yq >/dev/null 2>&1; then
+                yq -i ".spec.template.spec.containers[0].image = \\"${repo}:${tag}\\"" "$file"
+              else
+                sed -i -E "s|^(\\s*image:\\s*).*$|\\1${repo}:${tag}|" "$file"
+              fi
             }
 
             update_image k8s/a/deployment.yaml ${ECR_A} ${BUILD_TAG}
@@ -102,12 +80,12 @@ pipeline {
             update_image k8s/c/deployment.yaml ${ECR_C} ${BUILD_TAG}
 
             git add k8s/*/deployment.yaml
-            git commit -m "[skip ci] chore(ci): bump images to ${BUILD_TAG}" || echo "No changes to commit."
+            git commit -m "chore(ci): bump images to ${BUILD_TAG}" || echo "No changes to commit."
 
             REPO_URL=$(git config --get remote.origin.url)
             echo "$REPO_URL" | grep -q '^http' || REPO_URL=$(echo "$REPO_URL" | sed 's#git@github.com:#https://github.com/#; s#\\.git$##').git
             REPO_URL_AUTH=$(echo "$REPO_URL" | sed "s#https://#https://${GHTOKEN}@#")
-            git push "$REPO_URL_AUTH" HEAD:refs/heads/${TARGET_BRANCH}
+            git push "$REPO_URL_AUTH" HEAD:$(git rev-parse --abbrev-ref HEAD)
           '''
         }
       }
@@ -115,8 +93,7 @@ pipeline {
   }
 
   post {
-    success { echo "Done." }
-    aborted { echo "Aborted by Guard (expected self-commit / [skip ci] / k8s-only)." }
+    success { echo "Build ${BUILD_TAG} done. Argo CD will auto-sync shortly." }
     failure { echo "Build failed. Please check logs." }
   }
 }
