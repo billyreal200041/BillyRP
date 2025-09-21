@@ -2,12 +2,12 @@ pipeline {
   agent any
 
   options {
-    disableConcurrentBuilds()            // 禁止并发
+    disableConcurrentBuilds()            // 禁并发
     timeout(time: 40, unit: 'MINUTES')
     timestamps()
   }
 
-  // 仅由 GitHub Webhook 触发（不要再配 Poll SCM）
+  // 仅由 GitHub Webhook 触发
   triggers { githubPush() }
 
   environment {
@@ -20,9 +20,10 @@ pipeline {
     BUILD_TAG = "${SHORT_SHA}-${env.BUILD_NUMBER}"
     DOCKER_BUILDKIT = '1'
 
-    // 自触发判定用
+    // 自触发识别
     BOT_NAME   = 'jenkins-bot'
     BOT_PREFIX = 'chore(ci): bump images'
+    SKIP_REST  = 'false'
   }
 
   stages {
@@ -30,10 +31,9 @@ pipeline {
       steps { checkout scm }
     }
 
-    // 里程碑：队列中较旧的构建到这会自动结束
     stage('Milestone #1') { steps { milestone(1) } }
 
-    // 自触发保护：若最近一次提交是本 Job 回写的 bump 提交，则直接中止流水线（不视为失败）
+    // 自触发保护（沙箱友好：不抛异常，只打标记，后续阶段用 when 跳过）
     stage('Self-push Guard') {
       steps {
         script {
@@ -41,15 +41,16 @@ pipeline {
           def lastMsg    = sh(script: "git log -1 --pretty=%s",  returnStdout: true).trim()
           echo "Last commit by: ${lastAuthor} | ${lastMsg}"
           if (lastAuthor == env.BOT_NAME && lastMsg.startsWith(env.BOT_PREFIX)) {
-            echo "Detected bot bump commit. Aborting to avoid self-trigger loop."
+            echo "Detected bot bump commit. Marking SKIP_REST=true to avoid self-trigger loop."
+            env.SKIP_REST = 'true'
             currentBuild.description = "No-op on bot commit"
-            throw new hudson.AbortException("No-op build (bot commit)")
           }
         }
       }
     }
 
     stage('Sanity: whoami & docker') {
+      when { expression { env.SKIP_REST != 'true' } }
       steps {
         sh '''
           set -e
@@ -60,8 +61,8 @@ pipeline {
     }
 
     stage('Login ECR (AK/SK via Jenkins Credentials)') {
+      when { expression { env.SKIP_REST != 'true' } }
       steps {
-        // 使用 Jenkins 全局凭据：ID=aws-access-key（类型：AWS Credentials）
         withAWS(credentials: 'aws-access-key', region: "${env.AWS_REGION}") {
           sh '''
             set -e
@@ -74,10 +75,10 @@ pipeline {
       }
     }
 
-    // 第二个里程碑：构建前再去重
-    stage('Milestone #2') { steps { milestone(2) } }
+    stage('Milestone #2') { when { expression { env.SKIP_REST != 'true' } } steps { milestone(2) } }
 
     stage('Build & Push Images') {
+      when { expression { env.SKIP_REST != 'true' } }
       steps {
         sh '''
           set -e
@@ -94,10 +95,10 @@ pipeline {
       }
     }
 
-    // 发布前最后去重
-    stage('Milestone #3') { steps { milestone(3) } }
+    stage('Milestone #3') { when { expression { env.SKIP_REST != 'true' } } steps { milestone(3) } }
 
     stage('Bump manifests & Push back to Git (main)') {
+      when { expression { env.SKIP_REST != 'true' } }
       steps {
         withCredentials([string(credentialsId: 'github-token', variable: 'GHTOKEN')]) {
           sh '''
@@ -105,7 +106,7 @@ pipeline {
             git config user.name  "jenkins-bot"
             git config user.email "jenkins-bot@local"
 
-            # 优先 yq；失败则回退 sed
+            # 优先 yq；失败则用 sed（无 sudo 权限时会自动回退）
             if ! command -v yq >/dev/null 2>&1; then
               (sudo apt-get update -y && sudo apt-get install -y yq) || true
             fi
@@ -126,7 +127,7 @@ pipeline {
 
             git add k8s/*/deployment.yaml
 
-            # 若没有改动就不提交、不推送，避免空推触发
+            # 无改动就不提交、不推送，避免空推触发
             if git diff --cached --quiet; then
               echo "[INFO] No manifest changes. Skip push."
               exit 0
@@ -134,7 +135,7 @@ pipeline {
 
             git commit -m "chore(ci): bump images to ${BUILD_TAG}"
 
-            # 统一用 https+token 推送；显式推到 main，避免 HEAD:HEAD 问题
+            # 用 https+token 推送；显式推到 main（避免 HEAD:HEAD 问题）
             REPO_URL=$(git config --get remote.origin.url)
             echo "$REPO_URL" | grep -q '^http' || REPO_URL=$(echo "$REPO_URL" | sed 's#git@github.com:#https://github.com/#; s#\\.git$##').git
             REPO_URL_AUTH=$(echo "$REPO_URL" | sed "s#https://#https://${GHTOKEN}@#")
@@ -148,7 +149,7 @@ pipeline {
 
   post {
     success { echo "Build ${BUILD_TAG} done. Argo CD will auto-sync shortly." }
-    failure { echo "Build failed. Please check logs." }
     aborted { echo "Aborted (self-push guard)." }
+    failure { echo "Build failed. Please check logs." }
   }
 }
