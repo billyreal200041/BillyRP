@@ -13,7 +13,7 @@ spec:
     spec:
       containers:
         - name: web
-          image: 692859925329.dkr.ecr.ap-southeast-5.amazonaws.com/demo-web-b:c6c2b0e-49
+          image: 692859925329.dkr.ecr.ap-southeast-5.amazonaws.com/demo-web-b:d4fecd5-50
           ports: [{containerPort: 80}]
           imagePullPolicy: Always
           readinessProbe:
